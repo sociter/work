@@ -125,6 +125,14 @@ def abs_pos2excel_pos(row, col):
 
     return excel_row, excel_col
 
+# formatbin 
+def int2bin(int_val, bit_width):
+    str_val = bin(int_val)
+    if str_val.startswith('-'):
+        return(str_val[0:1] + str_val[3:]).zfill(bit_width)
+    return str_val[2:].zfill(bit_width)
+def bin2int(bin_str):
+    return int(bin_str, 2)
 # }}}
 
 class Object: #{{{
@@ -471,6 +479,7 @@ class SlaveChannel(MatrixChannel): #{{{
         self.start_addr_list = []
         self.end_addr_list = []
         self.addr_dec = ''
+        self.addr_remap = ''
 
     def is_leaf(self): #{{{
         return self.leaf
@@ -569,7 +578,16 @@ class SlaveChannel(MatrixChannel): #{{{
     def set_addr_dec(self, addr_dec): #{{{
         self.addr_dec = addr_dec
     #}}}
-
+    def get_addr_remap(self): #{{{
+        return self.addr_remap
+    #}}}
+    def set_addr_remap(self, addr_remap): #{{{
+        self.addr_remap = addr_remap
+    #}}}
+    def remap_addr(self, addr, addr_remap): #{{{
+        addr_bin_str = int2bin(addr, 32)
+        #addr_remap.
+    #}}}
     def seek_path_by_addr(self, path_list, addr): #{{{
         # append parent matrix object and self slave object to path list
         path_list.append(self.get_parent())
@@ -581,14 +599,16 @@ class SlaveChannel(MatrixChannel): #{{{
             return 
         else: # slave is a path node, to found slv->mst path
             # to found slave's conjoint master object
-            #mst_obj = self.get_mst_by_name(self.name)
             parser_obj = self.get_parser_obj()
             mst_obj = parser_obj.get_mst_by_name(self.name)
             if(mst_obj == None):
                 self.logger.error("Path node slave '%s' can't found the conjoint master node in [%s.%s]."%(self.name, self.get_sheet_name(), self.get_mtx_name()))
                 sys.exit()
+            #if(self.addr_remap != ''):
+                
             mst_obj.seek_path_by_addr(path_list, addr)
     #}}}
+
     def __str__(self): #{{{
         ret = MatrixChannel.__str__(self)
         saddr_hex_list = [hex(addr) for addr in self.start_addr_list]
@@ -1202,10 +1222,14 @@ class MatrixExcelParser(Object): #{{{
             start_addr_cell = sheet_obj.cell(row, col  )
             end_addr_cell   = sheet_obj.cell(row, col+1)
             addr_dec_cell   = sheet_obj.cell(row, col+2)
+            addr_remap_cell = sheet_obj.cell(row, col+3)
+                
+            addr_remap_cell = sheet_obj.cell(row, col+3)
 
             start_address = start_addr_cell.value.strip()
             end_address   = end_addr_cell.value.strip()
             addr_dec      = addr_dec_cell.value.strip()
+            addr_remap = addr_remap_cell.value.strip()
 
             # self.logger.debug("[%s.%s] start_address=%s @ (%d, %s)"%(sheet_name, mtx_name, start_address, excel_row, excel_col))
             # self.logger.debug("[%s.%s] end_address  =%s @ (%d, %s)"%(sheet_name, mtx_name, end_address  , excel_row, excel_col))
@@ -1221,6 +1245,7 @@ class MatrixExcelParser(Object): #{{{
             slv_obj.set_leaf(slv_leaf)
 
             slv_obj.set_addr_dec(addr_dec)
+            slv_obj.set_addr_remap(addr_remap)
             
             #slv_obj.set_start_addr(start_address)
             #slv_obj.set_end_addr(end_address)
