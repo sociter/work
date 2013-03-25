@@ -1,4 +1,3 @@
-
 """
 This is file description.
 """
@@ -18,9 +17,7 @@ This is file description.
 
 # -*- coding:utf-8 -*-  
 __metaclass__ = type
-
-
-
+ 
 import os, sys,string,re,glob
 import time
 import ConfigParser
