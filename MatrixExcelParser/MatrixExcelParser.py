@@ -206,7 +206,7 @@ class MatrixChannel(Object): #{{{
         self.con_port_list = []     # protocol interface port connect list, support simple regular expression
 
         #self.path_list = []         # path list
-        self.path_list_dict = {}    # path list dictionary
+        #self.path_list_dict = {}    # path list dictionary
         
         # parameters for AXI protocol, valid only protocol type equal 'AXI'
         self.axi_arbitration = ''
@@ -314,15 +314,15 @@ class MatrixChannel(Object): #{{{
         self.con_port_list.append(port)
     #}}}
 
-    def get_path_list(self, addr): #{{{
-        if(self.path_list_dict.has_key(addr)):
-            return self.path_list_dict[addr]
-        else:
-            return None
+    #def get_path_list(self, addr): #{{{
+    #    if(self.path_list_dict.has_key(addr)):
+    #        return self.path_list_dict[addr]
+    #    else:
+    #        return None
     #}}}
-    def add_path_list(self, addr, path_list): #{{{
-        self.path_list_dict[addr] = path_list
-    #}}}
+    #def add_path_list(self, addr, path_list): #{{{
+    #    self.path_list_dict[addr] = path_list
+    ##}}}
 
     def get_axi_idw(self): #{{{
         return self.axi_idw
@@ -331,9 +331,9 @@ class MatrixChannel(Object): #{{{
         self.axi_idw = axi_idw
     #}}}
 
-    def get_path_str(self, path_list, addr): #{{{
+    def get_path_str(self, addr): #{{{
         path_str = "[ADDR: 0x%x] "%addr
-        #path_list = self.get_path_list(addr)
+        path_list = self.get_path_list_by_addr(addr)
         if (path_list == None):
             path_str += 'None' 
         else:
@@ -381,6 +381,7 @@ class MasterChannel(MatrixChannel): #{{{
         self.slv_dict = {}          # slave dictionary connected with the master
         self.slv_name_dict = {}     # slave name dictionary
         self.type = 'Master'
+        self.addr_path_list_dict = {}  # path list dictionary for master, the keys is address
 
     def is_root(self): #{{{
         return self.root
@@ -468,10 +469,19 @@ class MasterChannel(MatrixChannel): #{{{
             return self.get_slv_by_idx(idx)
     #}}}
 
+    def get_path_list_by_addr(self, addr): #{{{
+        if(self.addr_path_list_dict.has_key(addr)):
+            return self.addr_path_list_dict[addr]
+        else:
+            return None
+    #}}}
+    def add_path_list_by_addr(self, addr, path_list): #{{{
+        self.addr_path_list_dict[addr] = path_list
+    #}}}
     def seek_path_by_addr(self, path_list, addr): #{{{
         # append self master object to path list
         if(self.is_root()):
-            self.add_path_list(addr, path_list)
+            self.add_path_list_by_addr(addr, path_list)
         #self.logger.debug("Seek path 0x%x: Found a master: '%s'"%(addr, self.name))
         path_list.append(self)
         slv_obj = self.get_slv_by_addr(addr)
@@ -505,6 +515,7 @@ class SlaveChannel(MatrixChannel): #{{{
         self.end_remap_list = []
         self.addr_dec = ''
         self.addr_remap = ''
+        self.mst_path_list_dict = {} # path list dictionary for slave, the keys is master name
 
     def is_leaf(self): #{{{
         return self.leaf
@@ -705,6 +716,17 @@ class SlaveChannel(MatrixChannel): #{{{
         #self.logger.debug("remap addr: 0x%x -> 0x%x(offset:%x)"%(addr, remap_addr, remap_offset))
         return remap_addr
     #}}}
+
+    def get_path_list_by_mst(self, mst_name): #{{
+        if(self.mst_path_list_dict.has_key(mst_name)):
+            return self.mst_path_list_dict[mst_name]
+        else:
+            return None
+    #}}}
+    def add_path_list_by_mst(self, mst_name, addr, path_list): #{{{
+        # TBC TBC TBC
+    #}}}
+
     def seek_path_by_addr(self, path_list, addr): #{{{
         # append parent matrix object and self slave object to path list
         path_list.append(self.get_parent())
@@ -712,7 +734,7 @@ class SlaveChannel(MatrixChannel): #{{{
         #self.logger.debug("Seek path 0x%x: Found a matrix: '%s'"%(addr, self.get_mtx_name()))
         #self.logger.debug("Seek path 0x%x: Found a slave: '%s'"%(addr, self.name))
         if(self.is_leaf()): # is the leaf slave and return 
-            self.add_path_list(addr, path_list)
+            #self.add_path_list(addr, path_list)
             return 
         else: # slave is a path node, to found slv->mst path
             # to found slave's conjoint master object
