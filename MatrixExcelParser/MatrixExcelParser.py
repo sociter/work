@@ -7,7 +7,7 @@ These modules are required: os, sys, string, re, time, logging, xlrd
 # Spreadtrum Confidential Property. All rights are reserved.
 #
 # File name   : MatrixExcelParser.py {{{
-# Author      : gary.gao@spreadtrum.com and junhao.zheng@spreadtrum.com
+# Author      : 
 # Date        : 2013/03/10
 # Description : Bus Matrix Generator
 #
@@ -133,6 +133,24 @@ def int2bin(int_val, bit_width):
     return str_val[2:].zfill(bit_width)
 def bin2int(bin_str):
     return int(bin_str, 2)
+def bin_bits_get(int_val, bit_width, lsb, msb):
+    lsb_rvs = bit_width-msb-1
+    msb_rvs = bit_width-lsb
+    val_str = int2bin(int_val, bit_width)
+    fld_str = val_str[lsb_rvs:msb_rvs]
+    #print fld_str
+    return bin2int(fld_str)
+def bin_bits_set(int_val, bit_width, fld_val, lsb, msb):
+    val_list = list(int2bin(int_val, bit_width))
+    fld_list = list(int2bin(fld_val, msb-lsb+1))
+    val_list.reverse()
+    fld_list.reverse()
+    for n in range(lsb, msb+1):
+        val_list[n] = fld_list[n-lsb]
+    val_list.reverse()
+    val_str = ''.join(val_list)
+    return bin2int(val_str)
+    
 # }}}
 
 class Object: #{{{
@@ -313,9 +331,9 @@ class MatrixChannel(Object): #{{{
         self.axi_idw = axi_idw
     #}}}
 
-    def get_path_str(self, addr): #{{{
+    def get_path_str(self, path_list, addr): #{{{
         path_str = "[ADDR: 0x%x] "%addr
-        path_list = self.get_path_list(addr)
+        #path_list = self.get_path_list(addr)
         if (path_list == None):
             path_str += 'None' 
         else:
@@ -324,6 +342,10 @@ class MatrixChannel(Object): #{{{
                     path_str += "[Mst: %s] --> "%node.get_name()
                 elif isinstance(node, SlaveChannel):
                     path_str += "[Slv: %s] "%node.get_name()
+                    start_remap_list = node.get_start_remap_list()
+                    if(len(start_remap_list)>0):
+                        remap_addr = node.remap_addr(addr)
+                        path_str += " --> (REMAP: 0x%x to 0x%x) "%(addr, remap_addr)
                     if(node.is_leaf() == False):
                         path_str += " --> "
                 else: 
@@ -439,6 +461,7 @@ class MasterChannel(MatrixChannel): #{{{
     #}}}
     def get_slv_by_addr(self, addr): #{{{
         idx = self.get_slv_idx_by_addr(addr)
+        #print "addr=%x, idx=%d"%(addr, idx)
         if(idx == -1):
             return None
         else:
@@ -478,6 +501,8 @@ class SlaveChannel(MatrixChannel): #{{{
         self.type = "Slave"
         self.start_addr_list = []
         self.end_addr_list = []
+        self.start_remap_list = []
+        self.end_remap_list = []
         self.addr_dec = ''
         self.addr_remap = ''
 
@@ -532,11 +557,17 @@ class SlaveChannel(MatrixChannel): #{{{
     def get_start_addr(self, idx): #{{{
         return self.start_addr_list[idx]
     #}}}
-    def append_start_addr(self, start_addr): #{{{
-        self.start_addr_list.append(start_addr) 
-    #}}}
     def get_end_addr(self, idx): #{{{
         return self.end_addr_list[idx]
+    #}}}
+    def get_start_remap(self, idx): #{{{
+        return self.start_remap_list[idx]
+    #}}}
+    def get_end_remap(self, idx): #{{{
+        return self.end_remap_list[idx]
+    #}}}
+    def append_start_addr(self, start_addr): #{{{
+        self.start_addr_list.append(start_addr) 
     #}}}
     def append_end_addr(self, end_addr): #{{{
         self.end_addr_list.append(end_addr)
@@ -562,6 +593,19 @@ class SlaveChannel(MatrixChannel): #{{{
     def set_end_addr_list(self, end_addr_list): #{{{
         self.end_addr_list = end_addr_list
     #}}}
+    def get_start_remap_list(self): #{{{
+        return self.start_remap_list
+    #}}}
+    def set_start_remap_list(self, start_remap_list): #{{{
+        self.start_remap_list = start_remap_list
+    #}}}
+    def get_end_remap_list(self): #{{{
+        return self.end_remap_list
+    #}}}
+    def set_end_remap_list(self, end_remap_list): #{{{
+        self.end_remap_list = end_remap_list
+    #}}}
+
     def is_mem_hit(self, addr): #{{{
         hit_cnt = 0
         for idx in range(len(self.start_addr_list)):
@@ -572,21 +616,94 @@ class SlaveChannel(MatrixChannel): #{{{
             sys.exit()
         return hit_cnt
     #}}}
+    def get_mem_list_idx(self, addr): #{{{
+        hit_cnt = 0
+        ret = -1
+        for idx in range(len(self.start_addr_list)):
+            if((addr>=self.start_addr_list[idx]) and (addr<=self.end_addr_list[idx])):
+                hit_cnt += 1
+                ret = idx
+        if(hit_cnt > 1):
+            self.logger.error("[%s.%s] Hit memory address: '0x%h' in slave '%s' %d times!"%(self.get_sheet_name(), self.get_mtx_name(), addr, self.get_name(), hit_cnt))
+            sys.exit()
+        return ret
+    #}}}
+
     def get_addr_dec(self): #{{{
         return self.addr_dec
     #}}}
     def set_addr_dec(self, addr_dec): #{{{
         self.addr_dec = addr_dec
     #}}}
-    def get_addr_remap(self): #{{{
-        return self.addr_remap
-    #}}}
-    def set_addr_remap(self, addr_remap): #{{{
-        self.addr_remap = addr_remap
-    #}}}
-    def remap_addr(self, addr, addr_remap): #{{{
-        addr_bin_str = int2bin(addr, 32)
-        #addr_remap.
+    def remap_addr(self, addr): #{{{
+        #addr_bin_str = int2bin(addr, 32)
+        #print addr_bin_str
+        #addr_remap_str = re.sub('\s+', '', addr_remap_str)
+        #addr_remap_str = re.sub('_+', '', addr_remap_str)
+        #opt = 'eq'
+        #if(re.match != ''):
+        #    if(re.match('.*\+=', addr_remap_str)):
+        #        #print 'found += operator'
+        #        [lop, rop] = re.split('\+=', addr_remap_str)
+        #        opt = 'plus'
+        #    elif(re.match('.*-=', addr_remap_str)):
+        #        #print 'found -= operator'
+        #        [lop, rop] = re.split('\-=', addr_remap_str)
+        #        opt = 'minus'
+        #    elif(re.match('.*=', addr_remap_str)):
+        #        #print 'found = operator'
+        #        [lop, rop] = re.split('=+', addr_remap_str)
+        #        opt = 'eq'
+        #    else:
+        #        self.logger.error("remap addr format invalid: '%s', can't found '=', '+=' or '-=' operator!"%addr_remap_str)
+        #        sys.exit()
+        ##print 'lop=%s, rop=%s'%(lop, rop)
+        #if(re.match("^0?x([0-9a-fA-F]+)|^\d*'?h([0-9a-fA-F]+)", rop)):
+        #    #rop = int(rop, 16)
+        #    m = re.match("^0?x([0-9a-fA-F]+)|^\d*'?h([0-9a-fA-F]+)", rop)
+        #    rop = int(m.group(1), 16)
+        #elif(re.match("^\d*'?b([01]+)", rop)):
+        #    #rop = int(rop, 2)
+        #    m = re.match("^\d*'?b([01]+)", rop)
+        #    rop = int(m.group(1), 2)
+        #elif(re.match("^\d*'?d([0-9]+)", rop)):
+        #    #rop = int(rop)
+        #    m = re.match("^\d*'?d([0-9]+)", rop)
+        #    rop = int(m.group(1))
+        #else:
+        #    self.logger.error("remap addr format invalid: %s"%rop)
+        #    sys.exit()
+        #print "rop=0x%x"%rop
+        #b_match = re.match('.*\[(\d+)(:)?(\d+)*\]', lop)
+        #if(b_match):
+        #    if(b_match.lastindex == 3):
+        #        msb = int(b_match.group(1), 10)
+        #        lsb = int(b_match.group(3), 10)
+        #    else:
+        #        lsb = msb = int(b_match.group(1), 10)
+        #    #print 'len=%s, lsb=%d, msb=%d'%(b_match.group(0), lsb, msb)
+        #    if(opt == 'eq'):
+        #        addr = bin_bits_set(addr, 32, rop, lsb, msb) 
+        #    elif(opt == 'plus'):
+        #        addr_tmp = bin_bits_get(addr, 32, lsb, msb)
+        #        addr_tmp += rop
+        #        addr = bin_bits_set(addr, 32, addr_tmp, lsb, msb)
+        #    elif(opt == 'minus'):
+        #        addr_tmp = bin_bits_get(addr, 32, lsb, msb)
+        #        addr_tmp -= rop
+        #        print "rop=0x%x, addr_tmp=0x%x"%(rop, addr_tmp)
+        #        addr = bin_bits_set(addr, 32, addr_tmp, lsb, msb)
+        #    #print "addr=0x%x"%addr
+        #else:
+        #    self.logger.error("remap addr format invalid: '%s', should be addr[lsb:msb]!"%addr_remap_str)
+        #    sys.exit()
+        idx = self.get_mem_list_idx(addr)
+        start_addr = self.get_start_addr(idx)
+        start_remap = self.get_start_remap(idx)
+        remap_offset = start_remap - start_addr
+        remap_addr = addr + remap_offset
+        #self.logger.debug("remap addr: 0x%x -> 0x%x(offset:%x)"%(addr, remap_addr, remap_offset))
+        return remap_addr
     #}}}
     def seek_path_by_addr(self, path_list, addr): #{{{
         # append parent matrix object and self slave object to path list
@@ -606,6 +723,12 @@ class SlaveChannel(MatrixChannel): #{{{
                 sys.exit()
             #if(self.addr_remap != ''):
                 
+            #addr_remap_str = self.get_addr_remap()
+            #if(addr_remap_str != ''):
+            #    addr = self.remap_addr(addr, addr_remap_str)
+            start_remap_list = self.get_start_remap_list()
+            if(len(start_remap_list)>0):
+                addr = self.remap_addr(addr)
             mst_obj.seek_path_by_addr(path_list, addr)
     #}}}
 
@@ -1030,6 +1153,8 @@ class MatrixExcelParser(Object): #{{{
         self.leaf_slv_dict = {}
         self.mst_dict      = {}
         self.slv_dict      = {}
+        self.start_addr_dict = {}
+        self.end_addr_dict = {}
 
         # master paths
         self.root_mst_path_dict = {}
@@ -1219,17 +1344,17 @@ class MatrixExcelParser(Object): #{{{
             row = s0_row+slv_idx
             col = s0_col+2+mst_num
             (excel_row, excel_col) = abs_pos2excel_pos(row, col)
-            start_addr_cell = sheet_obj.cell(row, col  )
-            end_addr_cell   = sheet_obj.cell(row, col+1)
-            addr_dec_cell   = sheet_obj.cell(row, col+2)
-            addr_remap_cell = sheet_obj.cell(row, col+3)
+            start_addr_cell  = sheet_obj.cell(row, col  )
+            end_addr_cell    = sheet_obj.cell(row, col+1)
+            start_remap_cell = sheet_obj.cell(row, col+2)
+            end_remap_cell   = sheet_obj.cell(row, col+3)
+            addr_dec_cell    = sheet_obj.cell(row, col+4)
                 
-            addr_remap_cell = sheet_obj.cell(row, col+3)
-
             start_address = start_addr_cell.value.strip()
             end_address   = end_addr_cell.value.strip()
+            start_remap   = start_remap_cell.value.strip()
+            end_remap     = end_remap_cell.value.strip()
             addr_dec      = addr_dec_cell.value.strip()
-            addr_remap = addr_remap_cell.value.strip()
 
             # self.logger.debug("[%s.%s] start_address=%s @ (%d, %s)"%(sheet_name, mtx_name, start_address, excel_row, excel_col))
             # self.logger.debug("[%s.%s] end_address  =%s @ (%d, %s)"%(sheet_name, mtx_name, end_address  , excel_row, excel_col))
@@ -1245,7 +1370,7 @@ class MatrixExcelParser(Object): #{{{
             slv_obj.set_leaf(slv_leaf)
 
             slv_obj.set_addr_dec(addr_dec)
-            slv_obj.set_addr_remap(addr_remap)
+            #slv_obj.set_addr_remap(addr_remap)
             
             #slv_obj.set_start_addr(start_address)
             #slv_obj.set_end_addr(end_address)
@@ -1258,6 +1383,7 @@ class MatrixExcelParser(Object): #{{{
                 for idx in range(len(start_addr_list)):
                     if(re.match('^0x[0-9a-fA-F]+$', start_addr_list[idx])):
                         start_addr_list[idx] = int(start_addr_list[idx], 16)
+                        self.add_start_addr(start_addr_list[idx])
                     else:
                         self.logger.error("[%s.%s] address format invalid: '%s' @ (%d, %s). [Only hex format is accepted]"%(sheet_name, mtx_name, start_addr_list[idx], excel_row, excel_col))
                         sys.exit()
@@ -1273,6 +1399,7 @@ class MatrixExcelParser(Object): #{{{
                 for idx in range(len(end_addr_list)):
                     if(re.match('^0x[0-9a-fA-F]+$', end_addr_list[idx])):
                         end_addr_list[idx] = int(end_addr_list[idx], 16)
+                        self.add_end_addr(end_addr_list[idx])
                     else:
                         self.logger.error("[%s.%s] address format invalid: '%s' @ (%d, %s). [Only hex format is accepted]"%(sheet_name, mtx_name, end_addr_list[idx], excel_row, excel_col))
                         sys.exit()
@@ -1281,9 +1408,55 @@ class MatrixExcelParser(Object): #{{{
                 self.logger.error("[%s.%s] invalid char found in end address: '%s' @ (%d, %s)"%(sheet_name, mtx_name, end_address, excel_row, excel_col))
                 sys.exit()
             
+            # parser remap address space to create memory segment for slave
+            if(start_remap == ''):
+                start_remap_list = []
+            else:
+                if(re.match('^[0-9a-fA-Fx_\s]+$', start_remap)): # start address
+                    start_remap = str(re.sub('_', '', start_remap))
+                    start_remap_list = re.split('\s+', start_remap)
+                    #print start_remap_list
+                    for idx in range(len(start_remap_list)):
+                        if(re.match('^0x[0-9a-fA-F]+$', start_remap_list[idx])):
+                            start_remap_list[idx] = int(start_remap_list[idx], 16)
+                        else:
+                            self.logger.error("[%s.%s] address format invalid: '%s' @ (%d, %s). [Only hex format is accepted]"%(sheet_name, mtx_name, start_remap_list[idx], excel_row, excel_col))
+                            sys.exit()
+                        self.logger.debug("start_remap_list[%d]=0x%x"%(idx, start_remap_list[idx]))
+                    if(len(start_remap_list) != len(start_addr_list)):
+                        self.logger.error("[%s.%s] start remap address list number: '%d' should equal start address list number: '%d' @ (%d, %s)"%(sheet_name, mtx_name, len(start_remap_list), len(start_addr_list), excel_row, excel_col))
+                        sys.exit()
+                else:
+                    self.logger.error("[%s.%s] invalid char found in start remap address: '%s' @ (%d, %s)"%(sheet_name, mtx_name, start_remap, excel_row, excel_col))
+                    sys.exit()
+
+            if(end_remap == ''):
+                end_remap_list = []
+            else:
+                if(re.match('^[0-9a-fA-Fx_\s]+$', end_remap)): # end address
+                    end_remap = str(re.sub('_', '', end_remap))
+                    end_remap_list = re.split('\s+', end_remap)
+                    #print end_remap_list
+                    for idx in range(len(end_remap_list)):
+                        if(re.match('^0x[0-9a-fA-F]+$', end_remap_list[idx])):
+                            end_remap_list[idx] = int(end_remap_list[idx], 16)
+                        else:
+                            self.logger.error("[%s.%s] address format invalid: '%s' @ (%d, %s). [Only hex format is accepted]"%(sheet_name, mtx_name, end_remap_list[idx], excel_row, excel_col))
+                            sys.exit()
+                        self.logger.debug("end_remap_list[%d]  =0x%x"%(idx, end_remap_list[idx]))
+                    if(len(end_remap_list) != len(end_addr_list)):
+                        self.logger.error("[%s.%s] end remap address list number: '%d' should equal end address list number: '%d' @ (%d, %s)"%(sheet_name, mtx_name, len(end_remap_list), len(end_addr_list), excel_row, excel_col))
+                        sys.exit()
+                else:
+                    self.logger.error("[%s.%s] invalid char found in end remap address: '%s' @ (%d, %s)"%(sheet_name, mtx_name, end_remap, excel_row, excel_col))
+                    sys.exit()
+            
             # set memory segment to slave
             slv_obj.set_start_addr_list(start_addr_list)
             slv_obj.set_end_addr_list(end_addr_list)
+            # set memory remap segment to slave
+            slv_obj.set_start_remap_list(start_remap_list)
+            slv_obj.set_end_remap_list(end_remap_list)
             
             # add slv to matrix
             mtx_obj.add_slv(slv_idx, slv_obj)
@@ -1337,6 +1510,7 @@ class MatrixExcelParser(Object): #{{{
             self.logger.debug(slv_obj)
             
     #}}} parser_matrix_table
+
     def get_mtx_by_name(self, mtx_name): #{{{
         if(self.has_mtx(mtx_name)):
             return self.mtx_dict[mtx_name]
@@ -1412,8 +1586,26 @@ class MatrixExcelParser(Object): #{{{
                 dir_path = self.work_dir+os.sep+"matrix_cfg"+os.sep
                 saveFile(os.path.join(dir_path+mtx_obj.get_name()+'.cfg'), cfg_file_contents)
     #}}}
+    def add_start_addr(self, addr): #{{{
+        self.start_addr_dict[addr] = addr
+    #}}}
+    def add_end_addr(self, addr): #{{{
+        self.end_addr_dict[addr] = addr
+    #}}}
+    def has_start_addr(self, addr): #{{{
+        return self.start_addr_dict.has_key(addr)
+    #}}}
+    def has_end_addr(self, addr): #{{{
+        return self.end_addr_dict.has_key(addr)
+    #}}}
+    def get_start_addr_list(self): #{{{
+        return self.start_addr_dict.keys()
+    #}}}
+    def get_end_addr_list(self): #{{{
+        return self.end_addr_dict.keys()
+    #}}}
 
-    def seek_mst_path(self, mst_name, addr): #{{{
+    def seek_path(self, mst_name, addr): #{{{
         path_list = []
         mst_obj = self.get_root_mst_by_name(mst_name)
         if(mst_obj == None):
@@ -1422,6 +1614,10 @@ class MatrixExcelParser(Object): #{{{
         else:
             mst_obj.seek_path_by_addr(path_list, addr)
         return path_list
+    #}}}
+
+    def seek_start_addr_list_path(self, mst_name, addr): #{{{
+
     #}}}
 
     def __str__(self): #{{{
