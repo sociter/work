@@ -16,8 +16,6 @@ This is file description.
 ###############################################################################
 
 # -*- coding:utf-8 -*-  
-__metaclass__ = type
- 
 import os, sys,string,re,glob
 import time
 import ConfigParser
@@ -85,25 +83,33 @@ def main():
     parser.set_work_dir(work_dir)
     parser.parser_xls(xls_name)
 
-    path_list = parser.seek_mst_path('apx', 0x0)
-    path_list = parser.seek_mst_path('apx', 0x60000000)
-    path_list = parser.seek_mst_path('apx', 0x20000000)
-    path_list = parser.seek_mst_path('apx', 0x70000000)
-    path_list = parser.seek_mst_path('apx', 0x40000000)
-    path_list = parser.seek_mst_path('apx', 0x50000000)
-    path_list = parser.seek_mst_path('apx', 0x80000000)
-    path_list = parser.seek_mst_path('apx', 0x4f000000)
+    path_list = parser.seek_path('apx', 0x0)
+    path_list = parser.seek_path('apx', 0x60000000)
+    path_list = parser.seek_path('apx', 0x20000000)
+    path_list = parser.seek_path('apx', 0x70000000)
+    #path_list = parser.seek_path('apx', 0x40000000)
+    #path_list = parser.seek_path('apx', 0x50000000)
+    #path_list = parser.seek_path('apx', 0x80000000)
+    #path_list = parser.seek_path('apx', 0x4f000000)
 
-    mst_obj = parser.get_mst_by_name('apx')
+    path_list = parser.seek_path('ap_dap', 0x0)
 
-    print mst_obj.get_path_str(0x0)
-    print mst_obj.get_path_str(0x60000000)
-    print mst_obj.get_path_str(0x20000000)
-    print mst_obj.get_path_str(0x70000000)
-    print mst_obj.get_path_str(0x40000000)
-    print mst_obj.get_path_str(0x50000000)
-    print mst_obj.get_path_str(0x80000000)
-    print mst_obj.get_path_str(0x4f000000)
+    mst0_obj = parser.get_mst_by_name('apx')
+    mst1_obj = parser.get_mst_by_name('ap_dap')
+
+    logger.info(mst0_obj.get_path_str(0x00000000))
+    logger.info(mst0_obj.get_path_str(0x60000000))
+    logger.info(mst0_obj.get_path_str(0x20000000))
+    logger.info(mst0_obj.get_path_str(0x70000000))
+    #logger.info(mst0_obj.get_path_str(0x40000000))
+    #logger.info(mst0_obj.get_path_str(0x50000000))
+    #logger.info(mst0_obj.get_path_str(0x80000000))
+    #logger.info(mst0_obj.get_path_str(0x4f000000))
+
+    logger.info(mst1_obj.get_path_str(0x00000000))
+
+    slv_obj = parser.get_slv_by_name('iram')
+    logger.info(slv_obj.get_path_str(0x00000000))
 
 
     #graph = mtx_graph(logger, 'mtx_graph', parser.ahb_mtxs, parser.axi_mtxs)
