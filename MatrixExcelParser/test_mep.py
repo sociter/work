@@ -2,11 +2,8 @@
 This is file description.
 """
 ###############################################################################
-# Copyright (c) 2013 @ Spreadtrum Communication Inc.
-# Spreadtrum Confidential Property. All rights are reserved.
-#
 # File name   : BusMatrixParser.py {{{
-# Author      : gary.gao@spreadtrum.com and junhao.zheng@spreadtrum.com
+# Author      : 
 # Date        : 2013/03/10
 # Description : Bus Matrix Generator
 #
@@ -83,34 +80,54 @@ def main():
     parser.set_work_dir(work_dir)
     parser.parser_xls(xls_name)
 
-    path_list = parser.seek_path('apx', 0x0)
-    path_list = parser.seek_path('apx', 0x60000000)
-    path_list = parser.seek_path('apx', 0x20000000)
-    path_list = parser.seek_path('apx', 0x70000000)
+    #path_list = parser.seek_path('apx', 0x0)
+    #path_list = parser.seek_path('apx', 0x60000000)
+    #path_list = parser.seek_path('apx', 0x20000000)
+    #path_list = parser.seek_path('apx', 0x70000000)
     #path_list = parser.seek_path('apx', 0x40000000)
     #path_list = parser.seek_path('apx', 0x50000000)
     #path_list = parser.seek_path('apx', 0x80000000)
     #path_list = parser.seek_path('apx', 0x4f000000)
 
-    path_list = parser.seek_path('ap_dap', 0x0)
+    #path_list = parser.seek_path('ap_dap', 0x0)
 
-    mst0_obj = parser.get_mst_by_name('apx')
-    mst1_obj = parser.get_mst_by_name('ap_dap')
+    #mst0_obj = parser.get_mst_by_name('apx')
+    #mst1_obj = parser.get_mst_by_name('ap_dap')
 
-    logger.info(mst0_obj.get_path_str(0x00000000))
-    logger.info(mst0_obj.get_path_str(0x60000000))
-    logger.info(mst0_obj.get_path_str(0x20000000))
-    logger.info(mst0_obj.get_path_str(0x70000000))
-    #logger.info(mst0_obj.get_path_str(0x40000000))
-    #logger.info(mst0_obj.get_path_str(0x50000000))
-    #logger.info(mst0_obj.get_path_str(0x80000000))
-    #logger.info(mst0_obj.get_path_str(0x4f000000))
+    #logger.info(mst0_obj.get_path_str_by_addr(0x00000000))
+    #logger.info(mst0_obj.get_path_str_by_addr(0x60000000))
+    #logger.info(mst0_obj.get_path_str_by_addr(0x20000000))
+    #logger.info(mst0_obj.get_path_str_by_addr(0x70000000))
+    #logger.info(mst0_obj.get_path_str_by_addr(0x40000000))
+    #logger.info(mst0_obj.get_path_str_by_addr(0x50000000))
+    #logger.info(mst0_obj.get_path_str_by_addr(0x80000000))
+    #logger.info(mst0_obj.get_path_str_by_addr(0x4f000000))
 
-    logger.info(mst1_obj.get_path_str(0x00000000))
+    #logger.info(mst1_obj.get_path_str_by_addr(0x00000000))
 
-    slv_obj = parser.get_slv_by_name('iram')
-    logger.info(slv_obj.get_path_str(0x00000000))
+    #slv_obj = parser.get_slv_by_name('iram')
+    #logger.info(slv_obj.get_path_str_by_mst('apx', 0x00000000))
 
+    root_mst_name_list = parser.get_root_mst_name_list()
+    for mst_name in root_mst_name_list: 
+        logger.info("=====================================")
+        logger.info("Seek path for master '%s':"%(mst_name))
+        logger.info("=====================================")
+        parser.seek_start_addr_list_path(mst_name)
+        mst_obj  = parser.get_mst_by_name(mst_name)
+        addr_list = parser.get_start_addr_list()
+        for addr in addr_list:
+            logger.info(mst_obj.get_path_str_by_addr(addr))
+
+    leaf_slv_name_list = parser.get_leaf_slv_name_list()
+    for slv_name in leaf_slv_name_list:
+        logger.info("=====================================")
+        logger.info("Try all paths for slave '%s':"%(slv_name))
+        logger.info("=====================================")
+        slv_obj = parser.get_slv_by_name(slv_name)
+        for mst_name in root_mst_name_list:
+            logger.info(slv_obj.get_path_str_by_mst(mst_name))
+        
 
     #graph = mtx_graph(logger, 'mtx_graph', parser.ahb_mtxs, parser.axi_mtxs)
     #graph.set_work_dir(work_dir)
