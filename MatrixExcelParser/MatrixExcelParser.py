@@ -314,43 +314,11 @@ class MatrixChannel(Object): #{{{
         self.con_port_list.append(port)
     #}}}
 
-    #def get_path_list(self, addr): #{{{
-    #    if(self.path_list_dict.has_key(addr)):
-    #        return self.path_list_dict[addr]
-    #    else:
-    #        return None
-    #}}}
-    #def add_path_list(self, addr, path_list): #{{{
-    #    self.path_list_dict[addr] = path_list
-    ##}}}
-
     def get_axi_idw(self): #{{{
         return self.axi_idw
     #}}}
     def set_axi_idw(self, axi_idw): #{{{
         self.axi_idw = axi_idw
-    #}}}
-
-    def get_path_str(self, addr): #{{{
-        path_str = "[ADDR: 0x%x] "%addr
-        path_list = self.get_path_list_by_addr(addr)
-        if (path_list == None):
-            path_str += 'None' 
-        else:
-            for node in path_list:
-                if isinstance(node, MasterChannel):
-                    path_str += "[Mst: %s] --> "%node.get_name()
-                elif isinstance(node, SlaveChannel):
-                    path_str += "[Slv: %s] "%node.get_name()
-                    start_remap_list = node.get_start_remap_list()
-                    if(len(start_remap_list)>0):
-                        remap_addr = node.remap_addr(addr)
-                        path_str += " --> (REMAP: 0x%x to 0x%x) "%(addr, remap_addr)
-                    if(node.is_leaf() == False):
-                        path_str += " --> "
-                else: 
-                    path_str += "[Mtx: %s] --> "%node.get_name()
-        return path_str
     #}}}
 
     def __str__(self):
@@ -490,7 +458,29 @@ class MasterChannel(MatrixChannel): #{{{
             path_list.append(slv_obj)
             return 
         else:
-            slv_obj.seek_path_by_addr(path_list, addr)
+            slv_obj.seek_path_by_addr(path_list, addr, self)
+    #}}}
+
+    def get_path_str_by_addr(self, addr): #{{{
+        path_str = "[ADDR: 0x%08x] "%addr
+        path_list = self.get_path_list_by_addr(addr)
+        if (path_list == None):
+            path_str += '= None' 
+        else:
+            for node in path_list:
+                if isinstance(node, MasterChannel):
+                    path_str += "[Mst: %s] --> "%node.get_name()
+                elif isinstance(node, SlaveChannel):
+                    path_str += "[Slv: %s] "%node.get_name()
+                    start_remap_list = node.get_start_remap_list()
+                    if(len(start_remap_list)>0):
+                        remap_addr = node.remap_addr(addr)
+                        path_str += " --> (REMAP: 0x%08x to 0x%08x) "%(addr, remap_addr)
+                    if(node.is_leaf() == False):
+                        path_str += " --> "
+                else: 
+                    path_str += "[Mtx: %s] --> "%node.get_name()
+        return path_str
     #}}}
 
     def __str__(self): #{{{
@@ -713,28 +703,36 @@ class SlaveChannel(MatrixChannel): #{{{
         start_remap = self.get_start_remap(idx)
         remap_offset = start_remap - start_addr
         remap_addr = addr + remap_offset
-        #self.logger.debug("remap addr: 0x%x -> 0x%x(offset:%x)"%(addr, remap_addr, remap_offset))
+        #self.logger.debug("remap addr: 0x%08x -> 0x%08x(offset:%08x)"%(addr, remap_addr, remap_offset))
         return remap_addr
     #}}}
 
-    def get_path_list_by_mst(self, mst_name): #{{
+    def get_path_list_by_mst(self, mst_name): #{{{
         if(self.mst_path_list_dict.has_key(mst_name)):
             return self.mst_path_list_dict[mst_name]
         else:
             return None
     #}}}
     def add_path_list_by_mst(self, mst_name, addr, path_list): #{{{
-        # TBC TBC TBC
+        mst_path_dict = self.get_path_list_by_mst(mst_name)
+        if(mst_path_dict == None):
+            mst_path_dict = {}
+            mst_path_dict[addr] = path_list
+            self.mst_path_list_dict[mst_name] = mst_path_dict
+            #print self.mst_path_list_dict
+        else:
+            mst_path_dict[addr] = path_list
+            self.mst_path_list_dict[mst_name] = mst_path_dict
     #}}}
 
-    def seek_path_by_addr(self, path_list, addr): #{{{
+    def seek_path_by_addr(self, path_list, addr, mst_obj): #{{{
         # append parent matrix object and self slave object to path list
         path_list.append(self.get_parent())
         path_list.append(self)
-        #self.logger.debug("Seek path 0x%x: Found a matrix: '%s'"%(addr, self.get_mtx_name()))
-        #self.logger.debug("Seek path 0x%x: Found a slave: '%s'"%(addr, self.name))
+        #self.logger.debug("Seek path 0x%08x: Found a matrix: '%s'"%(addr, self.get_mtx_name()))
+        #self.logger.debug("Seek path 0x%08x: Found a slave: '%s'"%(addr, self.name))
         if(self.is_leaf()): # is the leaf slave and return 
-            #self.add_path_list(addr, path_list)
+            self.add_path_list_by_mst(mst_obj.get_name(), addr, path_list)
             return 
         else: # slave is a path node, to found slv->mst path
             # to found slave's conjoint master object
@@ -754,6 +752,34 @@ class SlaveChannel(MatrixChannel): #{{{
             mst_obj.seek_path_by_addr(path_list, addr)
     #}}}
 
+    def get_path_str_by_mst(self, mst_name): #{{{
+        #path_str = "[MST: %s] "%mst_name
+        path_str = ''
+        mst_path_dict = self.get_path_list_by_mst(mst_name)
+        if (mst_path_dict == None):
+            path_str += '[MST: %s] = None'%mst_name
+        else:
+            idx = 0
+            for addr, path_list in mst_path_dict.items():
+                path_str += "[MST(#%d): %s, ADDR: 0x%08x] "%(idx, mst_name, addr) 
+                for node in path_list:
+                    if isinstance(node, MasterChannel):
+                        path_str += "[Mst: %s] --> "%node.get_name()
+                    elif isinstance(node, SlaveChannel):
+                        path_str += "[Slv: %s] "%node.get_name()
+                        start_remap_list = node.get_start_remap_list()
+                        if(len(start_remap_list)>0):
+                            remap_addr = node.remap_addr(addr)
+                            path_str += " --> (REMAP: 0x%08x to 0x%08x) "%(addr, remap_addr)
+                        if(node.is_leaf() == False):
+                            path_str += " --> "
+                    else: 
+                        path_str += "[Mtx: %s] --> "%node.get_name()
+                    idx += 1
+                if(idx < len(mst_path_dict)):
+                    path_str += '\n'
+        return path_str
+    #}}}
     def __str__(self): #{{{
         ret = MatrixChannel.__str__(self)
         saddr_hex_list = [hex(addr) for addr in self.start_addr_list]
@@ -1168,15 +1194,15 @@ class MatrixExcelParser(Object): #{{{
     
     def __init__(self, logger, name='un-named-MatrixExcelParser'): 
         Object.__init__(self, logger, name)
-        self.book          = None
-        self.sheet_dict    = {}
-        self.mtx_dict      = {}
-        self.root_mst_dict = {}
-        self.leaf_slv_dict = {}
-        self.mst_dict      = {}
-        self.slv_dict      = {}
-        self.start_addr_dict = {}
-        self.end_addr_dict = {}
+        self.book               = None
+        self.sheet_dict         = {}
+        self.mtx_dict           = {}
+        self.root_mst_dict      = {}
+        self.leaf_slv_dict      = {}
+        self.mst_dict           = {}
+        self.slv_dict           = {}
+        self.start_addr_dict    = {}
+        self.end_addr_dict      = {}
 
         # master paths
         self.root_mst_path_dict = {}
@@ -1198,7 +1224,7 @@ class MatrixExcelParser(Object): #{{{
         
         self.generate_ahb_cfg()
 
-        self.logger.debug(self.__str__())
+        #self.logger.debug(self.__str__())
     #}}}
     def parser_sheet(self, sheet_name, sheet_obj): #{{{
         col_a = sheet_obj.col(0)
@@ -1359,7 +1385,7 @@ class MatrixExcelParser(Object): #{{{
 
             (row, col) = mtx_header.get_slv_cell_pos('AP', slv_idx)
             (excel_row, excel_col) = abs_pos2excel_pos(row, col)
-            self.logger.debug("[%s.%s.%s] leaf flag: %s:%s"%(sheet_name, mtx_name, name, slv_ap, slv_leaf))
+            #self.logger.debug("[%s.%s.%s] leaf flag: %s:%s"%(sheet_name, mtx_name, name, slv_ap, slv_leaf))
 
             # found start_address, end_address, addr_dec
             (s0_row, s0_col) = mtx_header.get_cell_pos('S0')
@@ -1409,7 +1435,7 @@ class MatrixExcelParser(Object): #{{{
                     else:
                         self.logger.error("[%s.%s] address format invalid: '%s' @ (%d, %s). [Only hex format is accepted]"%(sheet_name, mtx_name, start_addr_list[idx], excel_row, excel_col))
                         sys.exit()
-                    self.logger.debug("start_addr_list[%d]=0x%x"%(idx, start_addr_list[idx]))
+                    #self.logger.debug("start_addr_list[%d]=0x%x"%(idx, start_addr_list[idx]))
             else:
                 self.logger.error("[%s.%s] invalid char found in start address: '%s' @ (%d, %s)"%(sheet_name, mtx_name, start_address, excel_row, excel_col))
                 sys.exit()
@@ -1425,7 +1451,7 @@ class MatrixExcelParser(Object): #{{{
                     else:
                         self.logger.error("[%s.%s] address format invalid: '%s' @ (%d, %s). [Only hex format is accepted]"%(sheet_name, mtx_name, end_addr_list[idx], excel_row, excel_col))
                         sys.exit()
-                    self.logger.debug("end_addr_list[%d]  =0x%x"%(idx, end_addr_list[idx]))
+                    #self.logger.debug("end_addr_list[%d]  =0x%x"%(idx, end_addr_list[idx]))
             else:
                 self.logger.error("[%s.%s] invalid char found in end address: '%s' @ (%d, %s)"%(sheet_name, mtx_name, end_address, excel_row, excel_col))
                 sys.exit()
@@ -1444,7 +1470,7 @@ class MatrixExcelParser(Object): #{{{
                         else:
                             self.logger.error("[%s.%s] address format invalid: '%s' @ (%d, %s). [Only hex format is accepted]"%(sheet_name, mtx_name, start_remap_list[idx], excel_row, excel_col))
                             sys.exit()
-                        self.logger.debug("start_remap_list[%d]=0x%x"%(idx, start_remap_list[idx]))
+                        #self.logger.debug("start_remap_list[%d]=0x%x"%(idx, start_remap_list[idx]))
                     if(len(start_remap_list) != len(start_addr_list)):
                         self.logger.error("[%s.%s] start remap address list number: '%d' should equal start address list number: '%d' @ (%d, %s)"%(sheet_name, mtx_name, len(start_remap_list), len(start_addr_list), excel_row, excel_col))
                         sys.exit()
@@ -1465,7 +1491,7 @@ class MatrixExcelParser(Object): #{{{
                         else:
                             self.logger.error("[%s.%s] address format invalid: '%s' @ (%d, %s). [Only hex format is accepted]"%(sheet_name, mtx_name, end_remap_list[idx], excel_row, excel_col))
                             sys.exit()
-                        self.logger.debug("end_remap_list[%d]  =0x%x"%(idx, end_remap_list[idx]))
+                        #self.logger.debug("end_remap_list[%d]  =0x%x"%(idx, end_remap_list[idx]))
                     if(len(end_remap_list) != len(end_addr_list)):
                         self.logger.error("[%s.%s] end remap address list number: '%d' should equal end address list number: '%d' @ (%d, %s)"%(sheet_name, mtx_name, len(end_remap_list), len(end_addr_list), excel_row, excel_col))
                         sys.exit()
@@ -1526,13 +1552,25 @@ class MatrixExcelParser(Object): #{{{
             self.mtx_dict[mtx_name] = mtx_obj
 
         # print debug information
-        for mst_name, mst_obj in mtx_obj.get_mst_dict().items():
-            self.logger.debug(mst_obj)
-        for slv_name, slv_obj in mtx_obj.get_slv_dict().items():
-            self.logger.debug(slv_obj)
+        #for mst_name, mst_obj in mtx_obj.get_mst_dict().items():
+        #    self.logger.debug(mst_obj)
+        #for slv_name, slv_obj in mtx_obj.get_slv_dict().items():
+        #    self.logger.debug(slv_obj)
             
     #}}} parser_matrix_table
 
+    def get_root_mst_dict(self): #{{{
+        return self.root_mst_dict
+    #}}}
+    def get_root_mst_name_list(self): #{{{
+        return self.root_mst_dict.keys()
+    #}}}
+    def get_leaf_slv_dict(self): #{{{
+        return self.leaf_slv_dict
+    #}}}
+    def get_leaf_slv_name_list(self): #{{{
+        return self.leaf_slv_dict.keys()
+    #}}}
     def get_mtx_by_name(self, mtx_name): #{{{
         if(self.has_mtx(mtx_name)):
             return self.mtx_dict[mtx_name]
@@ -1638,8 +1676,9 @@ class MatrixExcelParser(Object): #{{{
         return path_list
     #}}}
 
-    def seek_start_addr_list_path(self, mst_name, addr): #{{{
-
+    def seek_start_addr_list_path(self, mst_name): #{{{
+        for addr in self.start_addr_dict:
+            self.seek_path(mst_name, addr)
     #}}}
 
     def __str__(self): #{{{
