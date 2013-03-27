@@ -3,9 +3,6 @@ This module is used to parser matrix excel file.
 These modules are required: os, sys, string, re, time, logging, xlrd
 """
 ###############################################################################
-# Copyright (c) 2013 @ Spreadtrum Communication Inc.
-# Spreadtrum Confidential Property. All rights are reserved.
-#
 # File name   : MatrixExcelParser.py {{{
 # Author      : 
 # Date        : 2013/03/10
