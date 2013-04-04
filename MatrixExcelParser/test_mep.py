@@ -28,9 +28,6 @@ def main():
 
     print "\n=-------------------------------------------------------------------------------------="
     print "Bus Matrix Builder version %s."%mep.MEP_VERSION
-    print "Copyright (c) 2013 @ Spreadtrum Communication Inc."
-    print "Spreadtrum Confidential Property. All rights are reserved."
-    print "Authors: Gary.Gao and Junhao.Zheng (IC Group, Tech Dept.)."
     print "=-------------------------------------------------------------------------------------=\n"
 
     argv = sys.argv
@@ -79,34 +76,6 @@ def main():
     parser = mep.MatrixExcelParser(logger, 'bmb_cfg')
     parser.set_work_dir(work_dir)
     parser.parser_xls(xls_name)
-
-    #path_list = parser.seek_path('apx', 0x0)
-    #path_list = parser.seek_path('apx', 0x60000000)
-    #path_list = parser.seek_path('apx', 0x20000000)
-    #path_list = parser.seek_path('apx', 0x70000000)
-    #path_list = parser.seek_path('apx', 0x40000000)
-    #path_list = parser.seek_path('apx', 0x50000000)
-    #path_list = parser.seek_path('apx', 0x80000000)
-    #path_list = parser.seek_path('apx', 0x4f000000)
-
-    #path_list = parser.seek_path('ap_dap', 0x0)
-
-    #mst0_obj = parser.get_mst_by_name('apx')
-    #mst1_obj = parser.get_mst_by_name('ap_dap')
-
-    #logger.info(mst0_obj.get_path_str_by_addr(0x00000000))
-    #logger.info(mst0_obj.get_path_str_by_addr(0x60000000))
-    #logger.info(mst0_obj.get_path_str_by_addr(0x20000000))
-    #logger.info(mst0_obj.get_path_str_by_addr(0x70000000))
-    #logger.info(mst0_obj.get_path_str_by_addr(0x40000000))
-    #logger.info(mst0_obj.get_path_str_by_addr(0x50000000))
-    #logger.info(mst0_obj.get_path_str_by_addr(0x80000000))
-    #logger.info(mst0_obj.get_path_str_by_addr(0x4f000000))
-
-    #logger.info(mst1_obj.get_path_str_by_addr(0x00000000))
-
-    #slv_obj = parser.get_slv_by_name('iram')
-    #logger.info(slv_obj.get_path_str_by_mst('apx', 0x00000000))
 
     root_mst_name_list = parser.get_root_mst_name_list()
     for mst_name in root_mst_name_list: 
