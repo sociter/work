@@ -10,8 +10,11 @@ These modules are required: os, sys, string, re, time, logging, xlrd
 # Description : Bus Matrix Generator
 #
 # Version     : 0.10 - initial version. (2012/11/10) 
-#               0.20 - Modified the path string format.
-#                      Fixed a slave path list addition bug. (2012/04/01)
+#           0.20 - Modified the path string format.
+#                      Fixed a slave path list addition bug. 
+#                      Modified the path seek method. (2012/04/01)
+#           0.21 - Fix error message bug. 
+#                      Modified the different path print message. (2012/04/03)
 #}}}
 ###############################################################################
 
@@ -24,7 +27,7 @@ import time
 import logging
 import xlrd
 
-MEP_VERSION   = 0.30
+MEP_VERSION   = 0.21
 
 # {{{ global functions
 def timestamp():
@@ -349,6 +352,7 @@ class MasterChannel(MatrixChannel): #{{{
         self.slv_name_dict = {}     # slave name dictionary
         self.type = 'Master'
         self.addr_path_list_dict = {}  # path list dictionary for master, the keys is address
+        #self.path_list_dict = {}
 
     def is_root(self): #{{{
         return self.root
@@ -408,16 +412,18 @@ class MasterChannel(MatrixChannel): #{{{
         ret = -1
         slv_idx_list = self.get_slv_idx_list()
         #print slv_idx_list
+        slv_hit_list = []
         for idx in slv_idx_list:
             #print idx
             slv_obj = self.get_slv_by_idx(idx)
             if(slv_obj.is_mem_hit(addr)):
                 hit_cnt += 1
                 ret = idx
+                slv_hit_list.append(idx)
             
         if(hit_cnt>1):
-            self.logger.error("[%s.%s.%s] Hit memory address: '0x%h' in %d slaves!"%(self.get_sheet_name(), self.get_mtx_name(), self.get_name(), addr, self.get_name(), hit_cnt))
-            sys.exit()
+            self.logger.error("[%s.%s.%s] Hit memory address: '0x%08x' in %d slaves(%s)!"%(self.get_sheet_name(), self.get_mtx_name(), self.get_name(), addr, hit_cnt, slv_hit_list))
+            #sys.exit()
         return ret
     #}}}
     def get_slv_name_by_addr(self, addr): #{{{
@@ -459,6 +465,16 @@ class MasterChannel(MatrixChannel): #{{{
         else:
             slv_obj.seek_path_by_addr(path_list, addr, root_mst_obj, org_addr)
     #}}}
+    #def seek_path(self, path_list): #{{{
+    #    for idx in range(slef.get_slv_num):
+    #        slv_obj = self.get_slv_by_idx(idx)
+    #        slv_path_list = path_list
+    #        slv_path_list.append(self)
+    #        slv_path_list.append(self.get_parent())
+    #        self.path_list_dict[idx] = slv_path_list
+    #        if(slv_obj.is_leaf == False):
+    #            slv_obj.seek_path(slv_path_list)
+    ##}}}
 
     def get_path_str_by_addr(self, addr): #{{{
         parser_obj = self.get_parser_obj()
@@ -688,7 +704,7 @@ class SlaveChannel(MatrixChannel): #{{{
             parser_obj = self.get_parser_obj()
             mst_obj = parser_obj.get_mst_by_name(self.name)
             if(mst_obj == None):
-                self.logger.error("Path node slave '%s' can't found the conjoint master node in [%s.%s]."%(self.name, self.get_sheet_name(), self.get_mtx_name()))
+                self.logger.error("Path node slave(%d) '%s' can't found the conjoint master node in [%s.%s]."%(self.idx, self.name, self.get_sheet_name(), self.get_mtx_name()))
                 sys.exit()
             #if(self.addr_remap != ''):
                 
@@ -701,38 +717,67 @@ class SlaveChannel(MatrixChannel): #{{{
             mst_obj.seek_path_by_addr(path_list, addr, root_mst_obj, org_addr)
     #}}}
 
+    #def seek_path(self, path_list, root_mst_obj): #{{{
+    ##}}}
+
+    def diff_path(self, src_path_list, des_path_list): #{{{
+        if(len(src_path_list) != len(des_path_list)):
+            return 1
+        else:
+            for idx in range(len(src_path_list)):
+                if(src_path_list[idx].get_name() != des_path_list[idx].get_name()):
+                    return 1
+        return 0
+    #}}}
+
     def get_path_str_by_mst(self, mst_name): #{{{
         parser_obj = self.get_parser_obj()
         path_str = ''
         mst_path_dict = self.get_path_list_by_mst(mst_name)
         if (mst_path_dict == None):
-            path_str += '[PATH(#0): %s] :: None'%(mst_name.ljust(parser_obj.get_mst_name_max_len()))
+            path_str += '[PATH(#00): %s] :: None'%(mst_name.ljust(parser_obj.get_mst_name_max_len()))
         else:
             idx = 0
             for addr, path_list in mst_path_dict.items():
-                path_str += "[PATH(#%d): %s] :: [ADDR : 0x%08x] "%(idx, mst_name.ljust(parser_obj.get_mst_name_max_len()), addr) 
-                for node in path_list:
-                    if isinstance(node, MasterChannel):
-                        path_str += "[Mst: %s] --> "%node.get_name().ljust(parser_obj.get_mst_name_max_len())
-                    elif isinstance(node, SlaveChannel):
-                        sp_str = '\n'+' '*(23+parser_obj.get_mst_name_max_len())
-                        path_str += "[Slv: %s] "%node.get_name().ljust(parser_obj.get_mtx_name_max_len())
-                        start_remap_list = node.get_start_remap_list()
-                        remap_str = ''
-                        #if(len(start_remap_list)>0):
-                        #    remap_addr = node.remap_addr(addr)
-                        #    path_str += " --> (REMAP: 0x%08x to 0x%08x) "%(addr, remap_addr)
-                        if(node.is_leaf() == False):
-                            path_str += " --> "
-                            path_str += sp_str
-                            if(len(start_remap_list)>0):
-                                remap_addr = node.remap_addr(addr)
-                                path_str += "[REMAP: 0x%08x] "%remap_addr
-                            else:
-                                path_str += "[ADDR : 0x%08x] "%addr
-                    else: 
-                        path_str += "[Mtx: %s] --> "%node.get_name().ljust(parser_obj.get_mtx_name_max_len())
-                    idx += 1
+                if(idx>0):
+                    path_str += ' '*7
+                # find the real different path list
+                dif_idx = 0
+                sam_idx_list = []
+                dif_flg = 0
+                for dif_addr, dif_path_list in mst_path_dict.items():
+                    if(dif_idx<idx):
+                        if(self.diff_path(dif_path_list, path_list) == 0):
+                            sam_idx_list.append(dif_idx)
+                        else:
+                            dif_flg = 1
+                path_str += "[PATH(#%02d): %s] :: [ADDR : 0x%08x] "%(idx, mst_name.ljust(parser_obj.get_mst_name_max_len()), addr) 
+                #if(len(sam_idx_list) == 0):
+                
+                if(dif_flg or idx == 0):
+                    for node in path_list:
+                        if isinstance(node, MasterChannel):
+                            if(dif_flg):
+                                path_str += "[DIF PATH] "
+                            path_str += "[Mst: %s] --> "%node.get_name().ljust(parser_obj.get_mst_name_max_len())
+                        elif isinstance(node, SlaveChannel):
+                            sp_str = '\n'+' '*(24+parser_obj.get_mst_name_max_len())
+                            path_str += "[Slv: %s] "%node.get_name().ljust(parser_obj.get_mtx_name_max_len())
+                            start_remap_list = node.get_start_remap_list()
+                            remap_str = ''
+                            if(node.is_leaf() == False):
+                                path_str += " --> "
+                                path_str += sp_str
+                                if(len(start_remap_list)>0):
+                                    remap_addr = node.remap_addr(addr)
+                                    path_str += "[REMAP: 0x%08x] "%remap_addr
+                                else:
+                                    path_str += "[ADDR : 0x%08x] "%addr
+                        else: 
+                            path_str += "[Mtx: %s] --> "%node.get_name().ljust(parser_obj.get_mtx_name_max_len())
+                else:
+                    path_str += " PATH(#%02d) is identical with PATH(#%02d)"%(idx, sam_idx_list[0])
+                idx += 1
                 if(idx < len(mst_path_dict)):
                     path_str += '\n'
         return path_str
@@ -1118,14 +1163,16 @@ class MatrixTable(Object): #{{{
         hit_cnt = 0
         ret = -1
         slv_idx_list = self.get_slv_idx_list()
+        slv_hit_list = []
         for idx in slv_idx_list:
             slv_obj = self.get_slv_by_idx(idx)
             if(slv_obj.is_mem_hit(addr)):
                 hit_cnt += 1
                 ret = idx
+                slv_hit_list.append(idx)
             
         if(hit_cnt>1):
-            self.logger.error("[%s.%s] Hit memory address: '0x%h' in %d slaves!"%(self.get_sheet_name(), self.get_mtx_name(), addr, self.get_name(), hit_cnt))
+            self.logger.error("[%s.%s] Hit memory address: '0x%08x' in %d slaves(%s)!"%(self.get_sheet_name(), self.get_mtx_name(), addr, hit_cnt, slv_hit_list))
             sys.exit()
         return ret
     #}}}
@@ -1654,7 +1701,7 @@ class MatrixExcelParser(Object): #{{{
         self.slv_name_max_len = max_len
     #}}}
 
-    def seek_path(self, mst_name, addr): #{{{
+    def seek_mst_path_by_addr(self, mst_name, addr): #{{{
         path_list = []
         mst_obj = self.get_root_mst_by_name(mst_name)
         if(mst_obj == None):
@@ -1667,8 +1714,12 @@ class MatrixExcelParser(Object): #{{{
 
     def seek_start_addr_list_path(self, mst_name): #{{{
         for addr in self.start_addr_dict:
-            self.seek_path(mst_name, addr)
+            self.seek_mst_path_by_addr(mst_name, addr)
     #}}}
+
+    #def seek_mst_path(self, mst_name): #{{{
+    #    pass
+    ##}}}
 
     def __str__(self): #{{{
         ########################################
