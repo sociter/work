@@ -10,11 +10,14 @@ These modules are required: os, sys, string, re, time, logging, xlrd
 # Description : Bus Matrix Generator
 #
 # Version     : 0.10 - initial version. (2012/11/10) 
-#           0.20 - Modified the path string format.
+#               0.20 - Modified the path string format.
 #                      Fixed a slave path list addition bug. 
 #                      Modified the path seek method. (2012/04/01)
-#           0.21 - Fix error message bug. 
+#               0.21 - Fix error message bug. 
 #                      Modified the different path print message. (2012/04/03)
+#               0.22 - Fix a generate_ahb_cfg function bug. (2012/04/04) 
+#               0.23 - Clock format update xxx_clk -> xxx_clk(xxx). 
+#                      New matrix type: #LOCAL added. (2012/04/05) 
 #}}}
 ###############################################################################
 
@@ -27,7 +30,7 @@ import time
 import logging
 import xlrd
 
-MEP_VERSION   = 0.21
+MEP_VERSION   = 0.20
 
 # {{{ global functions
 def timestamp():
@@ -267,6 +270,28 @@ class MatrixChannel(Object): #{{{
         self.active = active
     #}}}
     
+    def set_clock_str(self, mtx_type, clk_str): #{{{
+        if(mtx_type == 'ahb'):
+            self.set_clock('clk_ahb')
+            self.set_reset('rst_ahb_n')
+        else:  # ('pl301' or 'local'):
+            m = re.match('\w+\((\w+)\)', clk_str)
+            if(m):
+                clk = m.group(1)+'clk'
+                rst = m.group(1)+'resetn'
+            elif(re.match('clk', clk_str)):
+                clk = clk_str
+                rst = re.sub('clk', 'resetn', clk_str)
+                self.set_clock(clk_str)
+                self.set_reset(rst)
+            else:
+                clk = clk_str+'clk'
+                rst = clk_str+'resetn'
+            self.set_clock(clk)
+            self.set_reset(rst)
+        #self.logger.debug("clk=%s, rst=%s"%(self.clock, self.reset))
+    #}}}
+
     def get_clock(self): #{{{
         return self.clock
     #}}}
@@ -1013,7 +1038,7 @@ class MatrixTable(Object): #{{{
         self.book_name = ''             # excel work book name
         self.sheet_name = sheet_name    # excel sheet table name
         self.sobj = sheet_obj           # excel sheet object
-        self.mtx_type = mtx_type        # ahb or pl301 conplicated matrix
+        self.mtx_type = mtx_type        # ahb, pl301 or local conplicated matrix
         self.mst_num = mst_num          # master number for the matrix
         self.slv_num = slv_num          # slave number for the matrix
         self.start_row = start_row      # matrix table start line number in excel sheet
@@ -1251,6 +1276,11 @@ class MatrixExcelParser(Object): #{{{
                 self.logger.info("Found a AHB matrix table at (%d, %s) of sheet: %s"%(excel_row, excel_col, sheet_name))
                 parser_flg = 1
                 mtx_type = 'ahb'
+            elif re.match("#LOCAL", value, re.I): # found a local matrix table
+                excel_row, excel_col = abs_pos2excel_pos(row_idx, 0) 
+                self.logger.info("Found a LOCAL matrix table at (%d, %s) of sheet: %s"%(excel_row, excel_col, sheet_name))
+                parser_flg = 1
+                mtx_type = 'local'
 
             if(parser_flg):
                 mtx_header = MatrixTableHeader(self.logger, "header", self,  sheet_name, sheet_obj, row_idx)
@@ -1307,10 +1337,12 @@ class MatrixExcelParser(Object): #{{{
             # found mst DataBitwidth
             mst_dw = mtx_header.get_mst_cell_value('DataBitwidth', mst_idx)
             # found mst clock and reset signal
-            mst_clock = mtx_header.get_mst_cell_value('Clock', mst_idx)
-            mst_reset = re.sub('clk', 'resetn', mst_clock)
-            mst_clock = mst_clock.lower()
-            mst_reset = mst_reset.lower()
+            #mst_clock = mtx_header.get_mst_cell_value('Clock', mst_idx)
+            #mst_reset = re.sub('clk', 'resetn', mst_clock)
+            #mst_clock = mst_clock.lower()
+            #mst_reset = mst_reset.lower()
+            mst_clk_str = mtx_header.get_mst_cell_value('Clock', mst_idx).lower()
+
             # found function name 
             mst_function = mtx_header.get_mst_cell_value('Function', mst_idx)
             mst_function = mst_function.lower()
@@ -1334,8 +1366,9 @@ class MatrixExcelParser(Object): #{{{
             if(mst_name_len > self.mst_name_max_len):
                 self.set_mst_name_max_len(mst_name_len)
             mst_obj.set_function_name(mst_function)
-            mst_obj.set_clock(mst_clock)
-            mst_obj.set_reset(mst_reset)
+            #mst_obj.set_clock(mst_clock)
+            #mst_obj.set_reset(mst_reset)
+            mst_obj.set_clock_str(mtx_type, mst_clk_str)
             mst_obj.set_port_name(mst_port_name)
             mst_obj.set_axi_idw(mst_idw)
             mst_obj.set_root(mst_root)
@@ -1376,10 +1409,11 @@ class MatrixExcelParser(Object): #{{{
             # found slv DataBitwidth
             slv_dw = mtx_header.get_slv_cell_value('DataBitwidth', slv_idx)
             # found slv clock and reset signal
-            slv_clock = mtx_header.get_slv_cell_value('Clock', slv_idx)
-            slv_reset = re.sub('clk', 'resetn', slv_clock)
-            slv_clock = slv_clock.lower()
-            slv_reset = slv_reset.lower()
+            #slv_clock = mtx_header.get_slv_cell_value('Clock', slv_idx)
+            #slv_reset = re.sub('clk', 'resetn', slv_clock)
+            #slv_clock = slv_clock.lower()
+            #slv_reset = slv_reset.lower()
+            slv_clk_str  = mtx_header.get_slv_cell_value('Clock', slv_idx)
             # found function name
             slv_function = mtx_header.get_slv_cell_value('Function', slv_idx)
             slv_function = slv_function.lower()
@@ -1428,8 +1462,9 @@ class MatrixExcelParser(Object): #{{{
             if(slv_name_len > self.slv_name_max_len):
                 self.set_slv_name_max_len(slv_name_len)
             slv_obj.set_function_name(slv_function)
-            slv_obj.set_clock(slv_clock)
-            slv_obj.set_reset(slv_reset)
+            #slv_obj.set_clock(slv_clock)
+            #slv_obj.set_reset(slv_reset)
+            slv_obj.set_clock_str(mtx_type, slv_clk_str)
             slv_obj.set_port_name(slv_port_name)
             slv_obj.set_axi_idw(slv_idw)
             slv_obj.set_leaf(slv_leaf)
@@ -1642,7 +1677,7 @@ class MatrixExcelParser(Object): #{{{
                     mst_obj = mtx_obj.get_mst_by_idx(mst_idx)
                     slv_str_list = [str(slv_idx) for slv_idx in mst_obj.get_slv_idx_list()]
                     mst_contents += "AHB,same,%d,%d,%s"%(mst_obj.get_dw(), mst_obj.get_slv_num(), ','.join(slv_str_list))
-                    if mst_idx != len(mtx_obj.get_mst_name_dict()):
+                    if mst_idx != (len(mtx_obj.get_mst_name_dict())-1):
                         mst_contents += '\n'
                     #print mst_contents
 
@@ -1650,15 +1685,43 @@ class MatrixExcelParser(Object): #{{{
                     slv_obj = mtx_obj.get_slv_by_idx(slv_idx)
                     mst_str_list = [str(mst_idx) for mst_idx in slv_obj.get_mst_idx_list()]
                     slv_contents += "AHB,same,%d,%d,%s,%s,1"%(slv_obj.get_dw(), slv_obj.get_mst_num(), ','.join(mst_str_list), slv_obj.get_addr_dec())
-                    if slv_idx != len(mtx_obj.get_slv_name_dict()):
+                    if slv_idx != (len(mtx_obj.get_slv_name_dict())-1):
                         slv_contents += '\n'
                     #print slv_contents
 
                 cfg_file_contents = """#Master Attribute List
 %s
 #Slave Attribute List
+%s"""%(mst_contents, slv_contents)
+                #print cfg_file_contents
+                dir_path = self.work_dir+os.sep+"matrix_cfg"+os.sep
+                saveFile(os.path.join(dir_path+mtx_obj.get_name()+'.cfg'), cfg_file_contents)
+    #}}}
+    def generate_vip_cfg(self): #{{{
+        for mtx_obj in self.mtx_dict.values():
+            if(mtx_obj.get_mtx_type() == 'ahb'):
+                mst_contents = ''
+                slv_contents = ''
+                for mst_idx in range(len(mtx_obj.get_mst_name_dict())):
+                    mst_obj = mtx_obj.get_mst_by_idx(mst_idx)
+                    slv_str_list = [str(slv_idx) for slv_idx in mst_obj.get_slv_idx_list()]
+                    mst_contents += "AHB,same,%d,%d,%s"%(mst_obj.get_dw(), mst_obj.get_slv_num(), ','.join(slv_str_list))
+                    if mst_idx != (len(mtx_obj.get_mst_name_dict())-1):
+                        mst_contents += '\n'
+                    #print mst_contents
+
+                for slv_idx in range(len(mtx_obj.get_slv_name_dict())):
+                    slv_obj = mtx_obj.get_slv_by_idx(slv_idx)
+                    mst_str_list = [str(mst_idx) for mst_idx in slv_obj.get_mst_idx_list()]
+                    slv_contents += "AHB,same,%d,%d,%s,%s,1"%(slv_obj.get_dw(), slv_obj.get_mst_num(), ','.join(mst_str_list), slv_obj.get_addr_dec())
+                    if slv_idx != (len(mtx_obj.get_slv_name_dict())-1):
+                        slv_contents += '\n'
+                    #print slv_contents
+
+                cfg_file_contents = """#Master Attribute List
 %s
-"""%(mst_contents, slv_contents)
+#Slave Attribute List
+%s"""%(mst_contents, slv_contents)
                 #print cfg_file_contents
                 dir_path = self.work_dir+os.sep+"matrix_cfg"+os.sep
                 saveFile(os.path.join(dir_path+mtx_obj.get_name()+'.cfg'), cfg_file_contents)
