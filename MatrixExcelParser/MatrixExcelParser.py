@@ -18,6 +18,8 @@ These modules are required: os, sys, string, re, time, logging, xlrd
 #               0.22 - Fix a generate_ahb_cfg function bug. (2012/04/04) 
 #               0.23 - Clock format update xxx_clk -> xxx_clk(xxx). 
 #                      New matrix type: #LOCAL added. (2012/04/05) 
+#               0.24 - New matrix type: #MEM added. 
+#                      Added slave falg: M (means memory for leaf slave)(2012/04/08)
 #}}}
 ###############################################################################
 
@@ -271,10 +273,10 @@ class MatrixChannel(Object): #{{{
     #}}}
     
     def set_clock_str(self, mtx_type, clk_str): #{{{
-        if(mtx_type == 'ahb'):
+        if(mtx_type == 'ahb' or mtx_type == 'sbus'):
             self.set_clock('clk_ahb')
             self.set_reset('rst_ahb_n')
-        else:  # ('pl301' or 'local'):
+        else:  # ('pl301' or 'memory'):
             m = re.match('\w+\((\w+)\)', clk_str)
             if(m):
                 clk = m.group(1)+'clk'
@@ -490,16 +492,6 @@ class MasterChannel(MatrixChannel): #{{{
         else:
             slv_obj.seek_path_by_addr(path_list, addr, root_mst_obj, org_addr)
     #}}}
-    #def seek_path(self, path_list): #{{{
-    #    for idx in range(slef.get_slv_num):
-    #        slv_obj = self.get_slv_by_idx(idx)
-    #        slv_path_list = path_list
-    #        slv_path_list.append(self)
-    #        slv_path_list.append(self.get_parent())
-    #        self.path_list_dict[idx] = slv_path_list
-    #        if(slv_obj.is_leaf == False):
-    #            slv_obj.seek_path(slv_path_list)
-    ##}}}
 
     def get_path_str_by_addr(self, addr): #{{{
         parser_obj = self.get_parser_obj()
@@ -543,9 +535,10 @@ class MasterChannel(MatrixChannel): #{{{
 #}}}
 
 class SlaveChannel(MatrixChannel): #{{{
-    def __init__(self, logger, name="un-name-SlaveChannel", parent=None, protocol='ABH', idx=0, dw=32, active=False):
+    def __init__(self, logger, name="un-name-SlaveChannel", parent=None, protocol='AHB', idx=0, dw=32, active=False):
         MatrixChannel.__init__(self, logger, name, parent, protocol, idx, dw, active)
         self.leaf = False           # is leaf node or not
+        self.mem_flg = False        # is memory or register for leaf node
         self.mst_dict = {}          # master dictionary connected with the slave
         self.mst_name_dict = {}     # master name dictionary
         self.type = "Slave"
@@ -562,6 +555,12 @@ class SlaveChannel(MatrixChannel): #{{{
     #}}}
     def set_leaf(self, leaf): #{{{
         self.leaf = leaf
+    #}}}
+    def is_mem(self): #{{{
+        return self.mem_flg
+    #}}}
+    def set_mem_flg(self, mem_flg): #{{{
+        self.mem_flg = mem_flg
     #}}}
     def get_mst_num(self): #{{{
         return len(self.mst_dict)
@@ -1038,7 +1037,7 @@ class MatrixTable(Object): #{{{
         self.book_name = ''             # excel work book name
         self.sheet_name = sheet_name    # excel sheet table name
         self.sobj = sheet_obj           # excel sheet object
-        self.mtx_type = mtx_type        # ahb, pl301 or local conplicated matrix
+        self.mtx_type = mtx_type        # ahb, pl301, memory or sbus matrix
         self.mst_num = mst_num          # master number for the matrix
         self.slv_num = slv_num          # slave number for the matrix
         self.start_row = start_row      # matrix table start line number in excel sheet
@@ -1046,6 +1045,8 @@ class MatrixTable(Object): #{{{
         self.slv_dict = {}              # slave dictionary
         self.mst_name_dict = {}         # master name dictionary
         self.slv_name_dict = {}         # slave name dictionary
+        self.vfile = ''
+        self.hier = ''
         
     def get_book_name(self): #{{{
         return self.book_name
@@ -1215,6 +1216,18 @@ class MatrixTable(Object): #{{{
         else:
             return self.get_slv_by_idx(idx)
     #}}}
+    def set_inst(self, inst): #{{{
+        self.inst = inst
+    #}}}
+    def get_inst(self): #{{{
+        return self.inst
+    #}}}
+    def set_vfile(self, vfile): #{{{
+        self.vfile = vfile
+    #}}}
+    def get_vfile(self): #{{{
+        return self.vfile
+    #}}}
 
 
 #}}}
@@ -1224,6 +1237,7 @@ class MatrixExcelParser(Object): #{{{
     def __init__(self, logger, name='un-named-MatrixExcelParser'): 
         Object.__init__(self, logger, name)
         self.book               = None
+        self.prj_name           = 'project'
         self.sheet_dict         = {}
         self.mtx_dict           = {}
         self.root_mst_dict      = {}
@@ -1245,7 +1259,9 @@ class MatrixExcelParser(Object): #{{{
     #}}}
 
     def parser_xls(self, xls_name): #{{{
-        self.logger.info("Parsing excel file '%s'..."%(xls_name))
+        m = re.match('^(\w+)[\s_]*', xls_name)
+        self.prj_name = m.group(1)
+        self.logger.info("Parsing excel file '%s' for project '%s'..."%(xls_name, self.prj_name))
         book = xlrd.open_workbook(xls_name)
         sheet_names = book.sheet_names()
         for sn in sheet_names:
@@ -1256,6 +1272,7 @@ class MatrixExcelParser(Object): #{{{
             self.parser_sheet(sn, sobj)
         
         self.generate_ahb_cfg()
+        self.generate_vip_cfg()
 
         #self.logger.debug(self.__str__())
     #}}}
@@ -1276,6 +1293,16 @@ class MatrixExcelParser(Object): #{{{
                 self.logger.info("Found a AHB matrix table at (%d, %s) of sheet: %s"%(excel_row, excel_col, sheet_name))
                 parser_flg = 1
                 mtx_type = 'ahb'
+            elif re.match("#MEM", value, re.I): # found a meory matrix table
+                excel_row, excel_col = abs_pos2excel_pos(row_idx, 0) 
+                self.logger.info("Found a MEMORY matrix table at (%d, %s) of sheet: %s"%(excel_row, excel_col, sheet_name))
+                parser_flg = 1
+                mtx_type = 'memory'
+            elif re.match("#SBUS", value, re.I): # found a sbus matrix table
+                excel_row, excel_col = abs_pos2excel_pos(row_idx, 0) 
+                self.logger.info("Found a SBUS matrix table at (%d, %s) of sheet: %s"%(excel_row, excel_col, sheet_name))
+                parser_flg = 1
+                mtx_type = 'sbus'
             elif re.match("#LOCAL", value, re.I): # found a local matrix table
                 excel_row, excel_col = abs_pos2excel_pos(row_idx, 0) 
                 self.logger.info("Found a LOCAL matrix table at (%d, %s) of sheet: %s"%(excel_row, excel_col, sheet_name))
@@ -1292,13 +1319,14 @@ class MatrixExcelParser(Object): #{{{
                     sys.exit()
 
             row_idx += 1
-
     #}}}
     def parser_matrix_table(self, sheet_name, sheet_obj, mtx_header, mtx_type): #{{{
         start_row = mtx_header.get_start_row()
 
         # get mtx name
         mtx_name = mtx_header.get_cell_value('Name')
+        mtx_name = re.sub('\(\w+\)', '', mtx_name)
+        mtx_name = '%s_%s'%(mtx_type, mtx_name)
         mtx_header.set_name(mtx_name)
         # found mtx mst_num
         mst_num = mtx_header.get_cell_value('Masters')
@@ -1315,6 +1343,8 @@ class MatrixExcelParser(Object): #{{{
 
         # create matrix table
         mtx_obj = MatrixTable(self.logger, mtx_name, self, sheet_name, sheet_obj, mtx_type, mst_num, slv_num, start_row)
+        mtx_obj.set_vfile(vfile)
+        mtx_obj.set_inst(inst)
         mtx_name_len = len(mtx_name)
         if(mtx_name_len > self.mtx_name_max_len):
             self.set_mtx_name_max_len(mtx_name_len)
@@ -1337,10 +1367,6 @@ class MatrixExcelParser(Object): #{{{
             # found mst DataBitwidth
             mst_dw = mtx_header.get_mst_cell_value('DataBitwidth', mst_idx)
             # found mst clock and reset signal
-            #mst_clock = mtx_header.get_mst_cell_value('Clock', mst_idx)
-            #mst_reset = re.sub('clk', 'resetn', mst_clock)
-            #mst_clock = mst_clock.lower()
-            #mst_reset = mst_reset.lower()
             mst_clk_str = mtx_header.get_mst_cell_value('Clock', mst_idx).lower()
 
             # found function name 
@@ -1409,10 +1435,6 @@ class MatrixExcelParser(Object): #{{{
             # found slv DataBitwidth
             slv_dw = mtx_header.get_slv_cell_value('DataBitwidth', slv_idx)
             # found slv clock and reset signal
-            #slv_clock = mtx_header.get_slv_cell_value('Clock', slv_idx)
-            #slv_reset = re.sub('clk', 'resetn', slv_clock)
-            #slv_clock = slv_clock.lower()
-            #slv_reset = slv_reset.lower()
             slv_clk_str  = mtx_header.get_slv_cell_value('Clock', slv_idx)
             # found function name
             slv_function = mtx_header.get_slv_cell_value('Function', slv_idx)
@@ -1430,6 +1452,10 @@ class MatrixExcelParser(Object): #{{{
                 slv_leaf = False
             else:
                 slv_leaf = True
+            if(re.match('M', slv_ap, re.I)):
+                slv_mem_flg = True
+            else:
+                slv_mem_flg = False
 
             (row, col) = mtx_header.get_slv_cell_pos('AP', slv_idx)
             (excel_row, excel_col) = abs_pos2excel_pos(row, col)
@@ -1468,6 +1494,7 @@ class MatrixExcelParser(Object): #{{{
             slv_obj.set_port_name(slv_port_name)
             slv_obj.set_axi_idw(slv_idw)
             slv_obj.set_leaf(slv_leaf)
+            slv_obj.set_mem_flg(slv_mem_flg)
 
             slv_obj.set_addr_dec(addr_dec)
             #slv_obj.set_addr_remap(addr_remap)
@@ -1698,33 +1725,210 @@ class MatrixExcelParser(Object): #{{{
                 saveFile(os.path.join(dir_path+mtx_obj.get_name()+'.cfg'), cfg_file_contents)
     #}}}
     def generate_vip_cfg(self): #{{{
-        for mtx_obj in self.mtx_dict.values():
-            if(mtx_obj.get_mtx_type() == 'ahb'):
-                mst_contents = ''
-                slv_contents = ''
-                for mst_idx in range(len(mtx_obj.get_mst_name_dict())):
-                    mst_obj = mtx_obj.get_mst_by_idx(mst_idx)
-                    slv_str_list = [str(slv_idx) for slv_idx in mst_obj.get_slv_idx_list()]
-                    mst_contents += "AHB,same,%d,%d,%s"%(mst_obj.get_dw(), mst_obj.get_slv_num(), ','.join(slv_str_list))
-                    if mst_idx != (len(mtx_obj.get_mst_name_dict())-1):
-                        mst_contents += '\n'
-                    #print mst_contents
+        chip_hld_contents = """
+[top]
+proj_name = %s
+"""%(self.prj_name)
 
-                for slv_idx in range(len(mtx_obj.get_slv_name_dict())):
-                    slv_obj = mtx_obj.get_slv_by_idx(slv_idx)
-                    mst_str_list = [str(mst_idx) for mst_idx in slv_obj.get_mst_idx_list()]
-                    slv_contents += "AHB,same,%d,%d,%s,%s,1"%(slv_obj.get_dw(), slv_obj.get_mst_num(), ','.join(mst_str_list), slv_obj.get_addr_dec())
-                    if slv_idx != (len(mtx_obj.get_slv_name_dict())-1):
-                        slv_contents += '\n'
-                    #print slv_contents
+        mtx_keys = []
+        local_mtx_keys = []
+        for k in sorted(self.mtx_dict.iterkeys()):
+            if(re.match('^local_', k)):
+                local_mtx_keys.append(k)
+            else:
+                mtx_keys.append(k)
+        mtx_keys.extend(local_mtx_keys)
+        mtx_idx = 0
+        for k in mtx_keys:
+            mtx_obj = self.mtx_dict[k]
+            mtx_name = mtx_obj.get_name()
+            mtx_type = mtx_obj.get_mtx_type()
+            if(re.match('^local_', k)):
+                chip_hld_contents += "; mtx%d      = %s.cfg\n"%(mtx_idx, mtx_name)
+            else:
+                chip_hld_contents += "mtx%d      = %s.cfg\n"%(mtx_idx, mtx_name)
+            mst_contents = ''
+            slv_contents = ''
+            mtx_contents = """
+[matrix]                
+name    = %s
+type    = %s
+vfile   = %s
+hier    = %s
+m_num   = %d
+s_num   = %d
+mtx_chk = 1
+mem_chk = 1
+"""%(mtx_name, mtx_type, mtx_obj.get_vfile(), mtx_obj.get_inst(), mtx_obj.get_mst_num(), mtx_obj.get_slv_num())
 
-                cfg_file_contents = """#Master Attribute List
-%s
-#Slave Attribute List
-%s"""%(mst_contents, slv_contents)
-                #print cfg_file_contents
-                dir_path = self.work_dir+os.sep+"matrix_cfg"+os.sep
-                saveFile(os.path.join(dir_path+mtx_obj.get_name()+'.cfg'), cfg_file_contents)
+            for mst_idx in range(len(mtx_obj.get_mst_name_dict())):
+                mst_obj = mtx_obj.get_mst_by_idx(mst_idx)
+                slv_str_list = [str(slv_idx) for slv_idx in mst_obj.get_slv_idx_list()]
+                slv_scons = ' '.join(slv_str_list)
+                mst_idx = mst_obj.get_idx()
+                mst_protocol = mst_obj.get_protocol()
+                mst_active = mst_obj.is_active()
+                mst_name = mst_obj.get_name()
+                mst_dw = mst_obj.get_dw()
+                mst_idw = mst_obj.get_axi_idw()
+                mst_clk = mst_obj.get_clock()
+                mst_reset = mst_obj.get_reset()
+                mst_port_name = mst_obj.get_port_name()
+                mst_root = mst_obj.is_root()
+                if(mst_active):
+                    mst_vfile = mst_obj.get_vfile()
+                    mst_hier = mst_obj.get_hier()
+                else:
+                    mst_vfile = 'matrix.vfile'
+                    mst_hier = 'matrix.hier'
+
+                if(mtx_type == 'memory' and mst_root == False):
+                    tmp_slv_obj = self.get_slv_by_name(mst_name)
+                    #print "mtx_name: %s, mst_name: %s, tmp_slv_obj: %s"%(mtx_name, mst_name, tmp_slv_obj)
+                    conj_slv_name = "s%d"%(tmp_slv_obj.get_idx())
+                    conj_mtx_name = tmp_slv_obj.get_mtx_name()
+                    mst_contents += """
+[m%d]
+conj    = %s.%s
+"""%(mst_idx, conj_mtx_name, conj_slv_name)
+                elif(re.match('AXI', mst_protocol)):
+                    mst_contents += """
+[m%d]
+type    = axi 
+active  = %d
+name    = %s
+dw      = %d
+idw     = %d
+scons   = %s
+vfile   = %s
+hier    = %s
+p0      = ACLK %s
+p1      = ARESETn %s
+p2      = (.*) \\1_%s_m%d
+"""%(mst_idx, mst_active, mst_name, mst_dw, mst_idw, slv_scons, mst_vfile, mst_hier, mst_clk, mst_reset, mst_port_name, mst_idx)
+                elif(re.match('AHB', mst_protocol)):
+                    mst_contents += """
+[m%d]
+type    = ahb 
+active  = %d
+name    = %s
+dw      = %d
+idw     = %d
+scons   = %s
+vfile   = %s
+hier    = %s
+p0      = HCLK %s
+p1      = HRESETn %s
+p2      = (.*) m%d_\\1
+"""%(mst_idx, mst_active, mst_name, mst_dw, mst_idw, slv_scons, mst_vfile, mst_hier, mst_clk, mst_reset, mst_idx)
+                elif(re.match('APB', mst_protocol)):
+                    mst_contents += """
+[m%d]
+type    = apb
+active  = %d
+name    = %s
+dw      = %d
+idw     = %d
+scons   = %s
+vfile   = %s
+hier    = %s
+p0      = PCLK %s
+p1      = PRESETn %s
+p2      = (.*) \\1_m%d
+"""%(mst_idx, mst_active, mst_name, mst_dw, mst_idw, slv_scons, mst_vfile, mst_hier, mst_clk, mst_reset, mst_idx)
+
+                #print mst_contents
+
+            for slv_idx in range(len(mtx_obj.get_slv_name_dict())):
+                slv_obj = mtx_obj.get_slv_by_idx(slv_idx)
+                mst_str_list = [str(mst_idx) for mst_idx in slv_obj.get_mst_idx_list()]
+                mst_scons = ' '.join(mst_str_list)
+                slv_idx = slv_obj.get_idx()
+                slv_protocol = slv_obj.get_protocol()
+                slv_active = slv_obj.is_active()
+                slv_name = slv_obj.get_name()
+                slv_dw = slv_obj.get_dw()
+                slv_idw = slv_obj.get_axi_idw()
+                slv_clk = slv_obj.get_clock()
+                slv_reset = slv_obj.get_reset()
+                slv_port_name = slv_obj.get_port_name()
+                slv_mem_flg = slv_obj.is_mem()
+                if(slv_active):
+                    slv_vfile = slv_obj.get_vfile()
+                    slv_hier = slv_obj.get_hier()
+                else:
+                    slv_vfile = 'matrix.vfile'
+                    slv_hier = 'matrix.hier'
+                saddr_list = slv_obj.get_start_addr_list()
+                eaddr_list = slv_obj.get_end_addr_list()
+                slv_mem_seg = ''
+                for idx in range(len(saddr_list)):
+                    saddr = saddr_list[idx]
+                    eaddr = eaddr_list[idx]
+                    slv_mem_seg += "32'h%08x:32'h%08x"%(saddr, eaddr)
+                    if(idx<(len(saddr_list)-1)):
+                        slv_mem_seg += ', '
+
+
+                if(re.match('AXI', slv_protocol)):
+                    slv_contents += """
+[s%d]
+type    = axi 
+active  = %d
+name    = %s
+mem     = %d
+dw      = %d
+idw     = %d
+vfile   = %s
+hier    = %s
+p0      = ACLK %s
+p1      = ARESETn %s
+p2      = (.*) \\1_%s_s%d
+mem_seg = %s
+"""%(slv_idx, slv_active, slv_name, slv_mem_flg, slv_dw, slv_idw, slv_vfile, slv_hier, slv_clk, slv_reset, slv_port_name, slv_idx, slv_mem_seg)
+                elif(re.match('AHB', slv_protocol)):
+                    slv_contents += """
+[s%d]
+type    = ahb 
+active  = %d
+name    = %s
+mem     = %d
+dw      = %d
+idw     = %d
+vfile   = %s
+hier    = %s
+p0      = HCLK %s
+p1      = HRESETn %s
+p2      = (.*) s%d_\\1
+p3      = HREADY s%d_hreadyout
+mem_seg = %s
+"""%(slv_idx, slv_active, slv_name, slv_mem_flg, slv_dw, slv_idw, slv_vfile, slv_hier, slv_clk, slv_reset, slv_idx, slv_idx, slv_mem_seg)
+                elif(re.match('APB', slv_protocol)):
+                    slv_contents += """
+[s%d]
+type    = apb
+active  = %d
+name    = %s
+mem     = %d
+dw      = %d
+idw     = %d
+vfile   = %s
+hier    = %s
+p0      = PCLK %s
+p1      = PRESETn %s
+p2      = (.*) \\1_s%d
+mem_seg = %s
+"""%(slv_idx, slv_active, slv_name, slv_mem_flg, slv_dw, slv_idw, slv_vfile, slv_hier, slv_clk, slv_reset, slv_idx, slv_mem_seg)
+
+
+            cfg_file_contents = mtx_contents+mst_contents+slv_contents
+            # print cfg_file_contents
+            dir_path = self.work_dir+os.sep+"vip_cfg"+os.sep
+            saveFile(os.path.join(dir_path+mtx_obj.get_name()+'.cfg'), cfg_file_contents)
+            mtx_idx += 1
+        # print chip_hld.cfg
+        dir_path = self.work_dir+os.sep+"vip_cfg"+os.sep
+        saveFile(os.path.join(dir_path+'chip_hld.cfg'), chip_hld_contents)
     #}}}
     def add_start_addr(self, addr): #{{{
         self.start_addr_dict[addr] = addr
