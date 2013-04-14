@@ -20,6 +20,8 @@ These modules are required: os, sys, string, re, time, logging, xlrd
 #                      New matrix type: #LOCAL added. (2012/04/05) 
 #               0.24 - New matrix type: #MEM added. 
 #                      Added slave falg: M (means memory for leaf slave)(2012/04/08)
+#               0.25 - Add generate_vip_cfg function to generate cofig file for 
+#                      matrix verfication environment. (2012/04/11)
 #}}}
 ###############################################################################
 
@@ -274,8 +276,23 @@ class MatrixChannel(Object): #{{{
     
     def set_clock_str(self, mtx_type, clk_str): #{{{
         if(mtx_type == 'ahb' or mtx_type == 'sbus'):
-            self.set_clock('clk_ahb')
-            self.set_reset('rst_ahb_n')
+            if(clk_str == ''):
+                clk = 'clk_ahb'
+                rst = 'rst_ahb_n'
+            else:
+                m = re.match('\w+\(([\w//]+)\)', clk_str)
+                if(m):
+                    clk_str = m.group(1)
+                    #print clk_str
+                if(clk_str == 'clk_ahb'):
+                    clk = clk_str
+                    rst = 'rst_ahb_n'
+                elif(re.match('\w+/\w+', clk_str)):
+                    clk, rst = clk_str.split(r'/')
+                else:
+                    self.logger.error("The AHB matrix's clock filed: '%s' format invalid!"%(clk_str))
+                    sys.exit()
+                
         else:  # ('pl301' or 'memory'):
             m = re.match('\w+\((\w+)\)', clk_str)
             if(m):
@@ -289,8 +306,8 @@ class MatrixChannel(Object): #{{{
             else:
                 clk = clk_str+'clk'
                 rst = clk_str+'resetn'
-            self.set_clock(clk)
-            self.set_reset(rst)
+        self.set_clock(clk)
+        self.set_reset(rst)
         #self.logger.debug("clk=%s, rst=%s"%(self.clock, self.reset))
     #}}}
 
@@ -937,7 +954,7 @@ class MatrixTableHeader(Object): #{{{
         (excel_row, excel_col) = abs_pos2excel_pos(row, col)
         cell = self.sheet_obj.cell(row, col)
         cell_value = str(cell.value).strip()
-        cell_value = re.sub('\s+', '_', cell_value)
+        cell_value = re.sub('\s+', '', cell_value)
         cell_value = self.cell_value_check(name, cell_value, excel_row, excel_col)
         return cell_value
     #}}}
@@ -1000,7 +1017,7 @@ class MatrixTableHeader(Object): #{{{
         (excel_row, excel_col) = abs_pos2excel_pos(row, col)
         cell = self.sheet_obj.cell(row, col)
         cell_value = str(cell.value).strip()
-        cell_value = re.sub('\s+', '_', cell_value)
+        cell_value = re.sub('\s+', '', cell_value)
         cell_value = self.channel_cell_value_check(name, cell_value, excel_row, excel_col, chn_name)
         return cell_value
     #}}}
@@ -1012,7 +1029,7 @@ class MatrixTableHeader(Object): #{{{
         #print excel_row, excel_col
         cell = self.sheet_obj.cell(row, col)
         cell_value = str(cell.value).strip()
-        cell_value = re.sub('\s+', '_', cell_value)
+        cell_value = re.sub('\s+', '', cell_value)
         cell_value = self.channel_cell_value_check(name, cell_value, excel_row, excel_col, chn_name)
         return cell_value
     #}}}
@@ -1047,6 +1064,7 @@ class MatrixTable(Object): #{{{
         self.slv_name_dict = {}         # slave name dictionary
         self.vfile = ''
         self.hier = ''
+        self.module_name = ''
         
     def get_book_name(self): #{{{
         return self.book_name
@@ -1228,6 +1246,12 @@ class MatrixTable(Object): #{{{
     def get_vfile(self): #{{{
         return self.vfile
     #}}}
+    def get_module_name(self): #{{{
+        return self.module_name
+    #}}}
+    def set_module_name(self, name): #{{{
+        self.module_name = name
+    #}}}
 
 
 #}}}
@@ -1325,8 +1349,15 @@ class MatrixExcelParser(Object): #{{{
 
         # get mtx name
         mtx_name = mtx_header.get_cell_value('Name')
-        mtx_name = re.sub('\(\w+\)', '', mtx_name)
-        mtx_name = '%s_%s'%(mtx_type, mtx_name)
+        module_name = mtx_name
+        m = re.match('(\w+)\((\w+)\)', mtx_name)
+        if(m):
+            mtx_name = m.group(1)
+            module_name = m.group(2)
+            #self.logger.debug("mtx_name: %s, module_name: %s"%(mtx_name, module_name))
+        #mtx_name = re.sub('\(\w+\)', '', mtx_name)
+        if(not re.match('^pl301', mtx_name)):
+            mtx_name = '%s_%s'%(mtx_type, mtx_name)
         mtx_header.set_name(mtx_name)
         # found mtx mst_num
         mst_num = mtx_header.get_cell_value('Masters')
@@ -1343,8 +1374,15 @@ class MatrixExcelParser(Object): #{{{
 
         # create matrix table
         mtx_obj = MatrixTable(self.logger, mtx_name, self, sheet_name, sheet_obj, mtx_type, mst_num, slv_num, start_row)
+        # found vfile and inst hierachy propeties
+        if(not re.match('\w+\.v$', vfile)):
+            vfile = "%s.v"%(module_name)
         mtx_obj.set_vfile(vfile)
+        if(re.match("`[\w_]+$", inst)):
+            inst = "%s.u_%s"%(inst, module_name)
         mtx_obj.set_inst(inst)
+        self.logger.debug(" ==== vfile: %s, inst: %s"%(vfile, inst))
+        mtx_obj.set_module_name(module_name)
         mtx_name_len = len(mtx_name)
         if(mtx_name_len > self.mtx_name_max_len):
             self.set_mtx_name_max_len(mtx_name_len)
@@ -1743,6 +1781,9 @@ proj_name = %s
             mtx_obj = self.mtx_dict[k]
             mtx_name = mtx_obj.get_name()
             mtx_type = mtx_obj.get_mtx_type()
+            pl301_bridge_flag = 0
+            if((mtx_obj.get_mst_num() == 1) and (mtx_obj.get_slv_num() == 1)):
+                pl301_bridge_flag = 1
             if(re.match('^local_', k)):
                 chip_hld_contents += "; mtx%d      = %s.cfg\n"%(mtx_idx, mtx_name)
             else:
@@ -1792,6 +1833,11 @@ mem_chk = 1
 conj    = %s.%s
 """%(mst_idx, conj_mtx_name, conj_slv_name)
                 elif(re.match('AXI', mst_protocol)):
+                    mst_port_str = ''
+                    if(pl301_bridge_flag):
+                        mst_port_str = "p2      = (.*) \\1_%s_m%d_s"%(mst_port_name, mst_idx)
+                    else:
+                        mst_port_str = "p2      = (.*) \\1_%s_m%d"%(mst_port_name, mst_idx)
                     mst_contents += """
 [m%d]
 type    = axi 
@@ -1804,9 +1850,24 @@ vfile   = %s
 hier    = %s
 p0      = ACLK %s
 p1      = ARESETn %s
-p2      = (.*) \\1_%s_m%d
-"""%(mst_idx, mst_active, mst_name, mst_dw, mst_idw, slv_scons, mst_vfile, mst_hier, mst_clk, mst_reset, mst_port_name, mst_idx)
+%s
+"""%(mst_idx, mst_active, mst_name, mst_dw, mst_idw, slv_scons, mst_vfile, mst_hier, mst_clk, mst_reset, mst_port_str)
                 elif(re.match('AHB', mst_protocol)):
+                    mst_port_str = ''
+                    if(mtx_type == 'pl301'):
+                        if(pl301_bridge_flag):
+                            mst_port_str = "p2      = (.*) \\1_%s_m%d_s"%(mst_port_name, mst_idx)
+                        else:
+                            mst_port_str = "p2      = (.*) \\1_%s_m%d"%(mst_port_name, mst_idx)
+                    elif(mtx_type == 'ahb' or mtx_type == 'sbus'):
+                        if(mst_port_name == ''):
+                            mst_port_str = "p2      = (.*) m%d_\\1"%(mst_idx)
+                        else:
+                            port_list = mst_port_name.split(';')
+                            p_idx = 2
+                            for p in port_list:
+                                mst_port_str += "p%d      = (.*) %s\n"%(p_idx, p)
+                                p_idx += 1
                     mst_contents += """
 [m%d]
 type    = ahb 
@@ -1819,9 +1880,14 @@ vfile   = %s
 hier    = %s
 p0      = HCLK %s
 p1      = HRESETn %s
-p2      = (.*) m%d_\\1
-"""%(mst_idx, mst_active, mst_name, mst_dw, mst_idw, slv_scons, mst_vfile, mst_hier, mst_clk, mst_reset, mst_idx)
+%s
+"""%(mst_idx, mst_active, mst_name, mst_dw, mst_idw, slv_scons, mst_vfile, mst_hier, mst_clk, mst_reset, mst_port_str)
                 elif(re.match('APB', mst_protocol)):
+                    mst_port_str = ''
+                    if(pl301_bridge_flag):
+                        mst_port_str = "p2      = (.*) \\1_%s_m%d_s"%(mst_port_name, mst_idx)
+                    else:
+                        mst_port_str = "p2      = (.*) \\1_%s_m%d"%(mst_port_name, mst_idx)
                     mst_contents += """
 [m%d]
 type    = apb
@@ -1834,8 +1900,8 @@ vfile   = %s
 hier    = %s
 p0      = PCLK %s
 p1      = PRESETn %s
-p2      = (.*) \\1_m%d
-"""%(mst_idx, mst_active, mst_name, mst_dw, mst_idw, slv_scons, mst_vfile, mst_hier, mst_clk, mst_reset, mst_idx)
+%s
+"""%(mst_idx, mst_active, mst_name, mst_dw, mst_idw, slv_scons, mst_vfile, mst_hier, mst_clk, mst_reset, mst_port_str)
 
                 #print mst_contents
 
@@ -1871,6 +1937,11 @@ p2      = (.*) \\1_m%d
 
 
                 if(re.match('AXI', slv_protocol)):
+                    slv_port_str = ''
+                    if(pl301_bridge_flag):
+                        slv_port_str = "p2      = (.*) \\1_%s_m%d_m"%(slv_port_name, slv_idx)
+                    else:
+                        slv_port_str = "p2      = (.*) \\1_%s_s%d"%(slv_port_name, slv_idx)
                     slv_contents += """
 [s%d]
 type    = axi 
@@ -1883,10 +1954,26 @@ vfile   = %s
 hier    = %s
 p0      = ACLK %s
 p1      = ARESETn %s
-p2      = (.*) \\1_%s_s%d
+%s
 mem_seg = %s
-"""%(slv_idx, slv_active, slv_name, slv_mem_flg, slv_dw, slv_idw, slv_vfile, slv_hier, slv_clk, slv_reset, slv_port_name, slv_idx, slv_mem_seg)
+"""%(slv_idx, slv_active, slv_name, slv_mem_flg, slv_dw, slv_idw, slv_vfile, slv_hier, slv_clk, slv_reset, slv_port_str, slv_mem_seg)
                 elif(re.match('AHB', slv_protocol)):
+                    slv_port_str = ''
+                    if(mtx_type == 'pl301'):
+                        if(pl301_bridge_flag):
+                            slv_port_str = "p2      = (.*) \\1_%s_m%d_m"%(slv_port_name, slv_idx)
+                        else:
+                            slv_port_str = "p2      = (.*) \\1_%s_s%d"%(slv_port_name, slv_idx)
+                    elif(mtx_type == 'ahb' or mtx_type == 'sbus'):
+                        if(slv_port_name == ''):
+                            slv_port_str = """p2      = (.*) s%d_\\1
+p3      = HREADY s%d_hreadyout"""%(slv_idx, slv_idx)
+                        else:
+                            port_list = slv_port_name.split(';')
+                            p_idx = 2
+                            for p in port_list:
+                                slv_port_str += "p%d      = (.*) %s\n"%(p_idx, p)
+                                p_idx += 1
                     slv_contents += """
 [s%d]
 type    = ahb 
@@ -1899,11 +1986,15 @@ vfile   = %s
 hier    = %s
 p0      = HCLK %s
 p1      = HRESETn %s
-p2      = (.*) s%d_\\1
-p3      = HREADY s%d_hreadyout
+%s
 mem_seg = %s
-"""%(slv_idx, slv_active, slv_name, slv_mem_flg, slv_dw, slv_idw, slv_vfile, slv_hier, slv_clk, slv_reset, slv_idx, slv_idx, slv_mem_seg)
+"""%(slv_idx, slv_active, slv_name, slv_mem_flg, slv_dw, slv_idw, slv_vfile, slv_hier, slv_clk, slv_reset, slv_port_str, slv_mem_seg)
                 elif(re.match('APB', slv_protocol)):
+                    slv_port_str = ''
+                    if(pl301_bridge_flag):
+                        slv_port_str = "p2      = (.*) \\1_%s_m%d_m"%(slv_port_name, slv_idx)
+                    else:
+                        slv_port_str = "p2      = (.*) \\1_%s_s%d"%(slv_port_name, slv_idx)
                     slv_contents += """
 [s%d]
 type    = apb
@@ -1916,9 +2007,9 @@ vfile   = %s
 hier    = %s
 p0      = PCLK %s
 p1      = PRESETn %s
-p2      = (.*) \\1_s%d
+%s
 mem_seg = %s
-"""%(slv_idx, slv_active, slv_name, slv_mem_flg, slv_dw, slv_idw, slv_vfile, slv_hier, slv_clk, slv_reset, slv_idx, slv_mem_seg)
+"""%(slv_idx, slv_active, slv_name, slv_mem_flg, slv_dw, slv_idw, slv_vfile, slv_hier, slv_clk, slv_reset, slv_port_str, slv_mem_seg)
 
 
             cfg_file_contents = mtx_contents+mst_contents+slv_contents
